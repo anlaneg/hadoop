@@ -35,6 +35,7 @@ import java.util.Set;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.StorageType;
+import org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.MountVolumeMap;
 import org.apache.hadoop.util.AutoCloseableLock;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.protocol.Block;
@@ -51,6 +52,7 @@ import org.apache.hadoop.hdfs.server.datanode.ReplicaInfo;
 import org.apache.hadoop.hdfs.server.datanode.ReplicaNotFoundException;
 import org.apache.hadoop.hdfs.server.datanode.StorageLocation;
 import org.apache.hadoop.hdfs.server.datanode.UnexpectedReplicaStateException;
+import org.apache.hadoop.hdfs.server.datanode.fsdataset.FsVolumeSpi.ScanInfo;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetFactory;
 import org.apache.hadoop.hdfs.server.datanode.metrics.FSDatasetMBean;
 import org.apache.hadoop.hdfs.server.protocol.BlockRecoveryCommand.RecoveringBlock;
@@ -191,7 +193,7 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
   FsVolumeReferences getFsVolumeReferences();
 
   /**
-   * Add a new volume to the FsDataset.<p/>
+   * Add a new volume to the FsDataset.
    *
    * If the FSDataset supports block scanning, this function registers
    * the new volume with the block scanner.
@@ -225,7 +227,7 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
   /** @return the volume that contains a replica of the block. */
   V getVolume(ExtendedBlock b);
 
-  /** @return a volume information map (name => info). */
+  /** @return a volume information map (name {@literal =>} info). */
   Map<String, Object> getVolumeInfoMap();
 
   /**
@@ -252,8 +254,7 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
    * and, in case that they are not matched, update the record or mark it
    * as corrupted.
    */
-  void checkAndUpdate(String bpid, long blockId, File diskFile,
-      File diskMetaFile, FsVolumeSpi vol) throws IOException;
+  void checkAndUpdate(String bpid, ScanInfo info) throws IOException;
 
   /**
    * @param b - the block
@@ -273,7 +274,8 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
 
   /**
    * Get reference to the replica meta info in the replicasMap. 
-   * To be called from methods that are synchronized on {@link FSDataset}
+   * To be called from methods that are synchronized on
+   * implementations of {@link FsDatasetSpi}
    * @return replica from the replicas map
    */
   @Deprecated
@@ -318,8 +320,8 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
    * @return the meta info of the replica which is being written to
    * @throws IOException if an error occurs
    */
-  ReplicaHandler createTemporary(StorageType storageType,
-      ExtendedBlock b) throws IOException;
+  ReplicaHandler createTemporary(StorageType storageType, String storageId,
+      ExtendedBlock b, boolean isTransfer) throws IOException;
 
   /**
    * Creates a RBW replica and returns the meta info of the replica
@@ -328,7 +330,7 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
    * @return the meta info of the replica which is being written to
    * @throws IOException if an error occurs
    */
-  ReplicaHandler createRbw(StorageType storageType,
+  ReplicaHandler createRbw(StorageType storageType, String storageId,
       ExtendedBlock b, boolean allowLazyPersist) throws IOException;
 
   /**
@@ -394,12 +396,14 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
    * Finalizes the block previously opened for writing using writeToBlock.
    * The block size is what is in the parameter b and it must match the amount
    *  of data written
+   * @param b Block to be finalized
+   * @param fsyncDir whether to sync the directory changes to durable device.
    * @throws IOException
    * @throws ReplicaNotFoundException if the replica can not be found when the
    * block is been finalized. For instance, the block resides on an HDFS volume
    * that has been removed.
    */
-  void finalizeBlock(ExtendedBlock b) throws IOException;
+  void finalizeBlock(ExtendedBlock b, boolean fsyncDir) throws IOException;
 
   /**
    * Unfinalizes the block previously opened for writing using writeToBlock.
@@ -486,14 +490,13 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
   /**
    * Determine if the specified block is cached.
    * @param bpid Block pool id
-   * @param blockIds - block id
+   * @param blockId - block id
    * @return true if the block is cached
    */
   boolean isCached(String bpid, long blockId);
 
     /**
      * Check if all the data directories are healthy
-     * @return A set of unhealthy data directories.
      * @param failedVolumes
      */
   void handleVolumeFailures(Set<FsVolumeSpi> failedVolumes);
@@ -623,7 +626,7 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
      * Move block from one storage to another storage
      */
    ReplicaInfo moveBlockAcrossStorage(final ExtendedBlock block,
-        StorageType targetStorageType) throws IOException;
+        StorageType targetStorageType, String storageId) throws IOException;
 
   /**
    * Set a block to be pinned on this datanode so that it cannot be moved
@@ -655,7 +658,33 @@ public interface FsDatasetSpi<V extends FsVolumeSpi> extends FSDatasetMBean {
       FsVolumeSpi destination) throws IOException;
 
   /**
-   * Acquire the lock of the data set.
+   * Acquire the lock of the data set. This prevents other threads from
+   * modifying the volume map structure inside the datanode, but other changes
+   * are still possible. For example modifying the genStamp of a block instance.
    */
   AutoCloseableLock acquireDatasetLock();
+
+  /***
+   * Acquire the read lock of the data set. This prevents other threads from
+   * modifying the volume map structure inside the datanode, but other changes
+   * are still possible. For example modifying the genStamp of a block instance.
+   * @return The AutoClosable read lock instance.
+   */
+  AutoCloseableLock acquireDatasetReadLock();
+
+
+  /**
+   * Deep copy the replica info belonging to given block pool.
+   * @param bpid Specified block pool id.
+   * @return A set of replica info.
+   * @throws IOException
+   */
+  Set<? extends Replica> deepCopyReplica(String bpid) throws IOException;
+
+  /**
+   * Get relationship between disk mount and FsVolume.
+   * @return Disk mount and FsVolume relationship.
+   * @throws IOException
+   */
+  MountVolumeMap getMountVolumeMap() throws IOException;
 }

@@ -27,9 +27,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Random;
 
-import com.google.common.collect.ImmutableList;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableList;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.ParentNotDirectoryException;
 import org.apache.hadoop.fs.Path;
@@ -43,11 +41,13 @@ import org.apache.hadoop.hdfs.DFSTestUtil;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.test.GenericTestUtils;
+import org.apache.hadoop.util.Lists;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.google.common.collect.Lists;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -58,7 +58,8 @@ import static org.junit.Assert.fail;
  * Test {@link FSDirectory}, the in-memory namespace tree.
  */
 public class TestFSDirectory {
-  public static final Log LOG = LogFactory.getLog(TestFSDirectory.class);
+  public static final Logger LOG =
+      LoggerFactory.getLogger(TestFSDirectory.class);
 
   private static final long seed = 0;
   private static final short REPLICATION = 3;

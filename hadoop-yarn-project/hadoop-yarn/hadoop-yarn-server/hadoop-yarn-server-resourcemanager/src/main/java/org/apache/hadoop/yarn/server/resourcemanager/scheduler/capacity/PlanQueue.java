@@ -19,11 +19,10 @@
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity;
 
 import java.io.IOException;
-import java.util.Iterator;
 
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.ReservationSystem;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerDynamicEditException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,13 +32,13 @@ import org.slf4j.LoggerFactory;
  * reservations, but functionality wise is a sub-class of ParentQueue
  *
  */
-public class PlanQueue extends ParentQueue {
+public class PlanQueue extends AbstractManagedParentQueue {
 
   private static final Logger LOG = LoggerFactory.getLogger(PlanQueue.class);
 
   private int maxAppsForReservation;
   private int maxAppsPerUserForReservation;
-  private int userLimit;
+  private float userLimit;
   private float userLimitFactor;
   protected CapacitySchedulerContext schedulerContext;
   private boolean showReservationsAsQueues;
@@ -47,6 +46,7 @@ public class PlanQueue extends ParentQueue {
   public PlanQueue(CapacitySchedulerContext cs, String queueName,
       CSQueue parent, CSQueue old) throws IOException {
     super(cs, queueName, parent, old);
+    updateAbsoluteCapacities();
 
     this.schedulerContext = cs;
     // Set the reservation queue attributes for the Plan
@@ -56,15 +56,20 @@ public class PlanQueue extends ParentQueue {
     showReservationsAsQueues = conf.getShowReservationAsQueues(queuePath);
     if (maxAppsForReservation < 0) {
       maxAppsForReservation =
-          (int) (CapacitySchedulerConfiguration.DEFAULT_MAXIMUM_SYSTEM_APPLICATIIONS * super
+          (int) (CapacitySchedulerConfiguration.
+              DEFAULT_MAXIMUM_SYSTEM_APPLICATIIONS * super
               .getAbsoluteCapacity());
     }
-    int userLimit = conf.getUserLimit(queuePath);
-    float userLimitFactor = conf.getUserLimitFactor(queuePath);
-    int maxAppsPerUserForReservation =
-        (int) (maxAppsForReservation * (userLimit / 100.0f) * userLimitFactor);
-    updateQuotas(userLimit, userLimitFactor, maxAppsForReservation,
-        maxAppsPerUserForReservation);
+    float configuredUserLimit = conf.getUserLimit(queuePath);
+    float configuredUserLimitFactor = conf.getUserLimitFactor(queuePath);
+    int configuredMaxAppsPerUserForReservation =
+        (int) (maxAppsForReservation * (configuredUserLimit / 100.0f) *
+            configuredUserLimitFactor);
+    if (configuredUserLimitFactor == -1) {
+      configuredMaxAppsPerUserForReservation = maxAppsForReservation;
+    }
+    updateQuotas(configuredUserLimit, configuredUserLimitFactor,
+        maxAppsForReservation, configuredMaxAppsPerUserForReservation);
 
     StringBuffer queueInfo = new StringBuffer();
     queueInfo.append("Created Plan Queue: ").append(queueName)
@@ -72,17 +77,18 @@ public class PlanQueue extends ParentQueue {
         .append("]\nwith max capacity: [").append(super.getMaximumCapacity())
         .append("\nwith max reservation apps: [").append(maxAppsForReservation)
         .append("]\nwith max reservation apps per user: [")
-        .append(maxAppsPerUserForReservation).append("]\nwith user limit: [")
-        .append(userLimit).append("]\nwith user limit factor: [")
-        .append(userLimitFactor).append("].");
+        .append(configuredMaxAppsPerUserForReservation)
+        .append("]\nwith user limit: [")
+        .append(configuredUserLimit).append("]\nwith user limit factor: [")
+        .append(configuredUserLimitFactor).append("].");
     LOG.info(queueInfo.toString());
   }
 
   @Override
   public void reinitialize(CSQueue newlyParsedQueue,
       Resource clusterResource) throws IOException {
+    writeLock.lock();
     try {
-      writeLock.lock();
       // Sanity check
       if (!(newlyParsedQueue instanceof PlanQueue) || !newlyParsedQueue
           .getQueuePath().equals(getQueuePath())) {
@@ -93,14 +99,14 @@ public class PlanQueue extends ParentQueue {
 
       PlanQueue newlyParsedParentQueue = (PlanQueue) newlyParsedQueue;
 
-      if (newlyParsedParentQueue.getChildQueues().size() > 0) {
+      if (newlyParsedParentQueue.getChildQueues().size() != 1) {
         throw new IOException(
             "Reservable Queue should not have sub-queues in the"
-                + "configuration");
+                + "configuration expect the default reservation queue");
       }
 
       // Set new configs
-      setupQueueConfigs(clusterResource);
+      setupQueueConfigs(clusterResource, csContext.getConfiguration());
 
       updateQuotas(newlyParsedParentQueue.userLimit,
           newlyParsedParentQueue.userLimitFactor,
@@ -119,66 +125,12 @@ public class PlanQueue extends ParentQueue {
     }
   }
 
-  void addChildQueue(CSQueue newQueue)
-      throws SchedulerDynamicEditException {
-    try {
-      writeLock.lock();
-      if (newQueue.getCapacity() > 0) {
-        throw new SchedulerDynamicEditException(
-            "Queue " + newQueue + " being added has non zero capacity.");
-      }
-      boolean added = this.childQueues.add(newQueue);
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("updateChildQueues (action: add queue): " + added + " "
-            + getChildQueuesToPrint());
-      }
-    } finally {
-      writeLock.unlock();
-    }
-  }
-
-  void removeChildQueue(CSQueue remQueue)
-      throws SchedulerDynamicEditException {
-    try {
-      writeLock.lock();
-      if (remQueue.getCapacity() > 0) {
-        throw new SchedulerDynamicEditException(
-            "Queue " + remQueue + " being removed has non zero capacity.");
-      }
-      Iterator<CSQueue> qiter = childQueues.iterator();
-      while (qiter.hasNext()) {
-        CSQueue cs = qiter.next();
-        if (cs.equals(remQueue)) {
-          qiter.remove();
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Removed child queue: {}", cs.getQueueName());
-          }
-        }
-      }
-    } finally {
-      writeLock.unlock();
-    }
-  }
-
-  protected float sumOfChildCapacities() {
-    try {
-      writeLock.lock();
-      float ret = 0;
-      for (CSQueue l : childQueues) {
-        ret += l.getCapacity();
-      }
-      return ret;
-    } finally {
-      writeLock.unlock();
-    }
-  }
-
-  private void updateQuotas(int userLimit, float userLimitFactor,
-      int maxAppsForReservation, int maxAppsPerUserForReservation) {
-    this.userLimit = userLimit;
-    this.userLimitFactor = userLimitFactor;
-    this.maxAppsForReservation = maxAppsForReservation;
-    this.maxAppsPerUserForReservation = maxAppsPerUserForReservation;
+  private void updateQuotas(float newUserLimit, float newUserLimitFactor,
+      int newMaxAppsForReservation, int newMaxAppsPerUserForReservation) {
+    this.userLimit = newUserLimit;
+    this.userLimitFactor = newUserLimitFactor;
+    this.maxAppsForReservation = newMaxAppsForReservation;
+    this.maxAppsPerUserForReservation = newMaxAppsPerUserForReservation;
   }
 
   /**
@@ -205,7 +157,7 @@ public class PlanQueue extends ParentQueue {
    *
    * @return userLimit
    */
-  public int getUserLimitForReservation() {
+  public float getUserLimitForReservation() {
     return userLimit;
   }
 

@@ -21,17 +21,20 @@ package org.apache.hadoop.hdfs.server.blockmanagement;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.primitives.Ints;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hadoop.thirdparty.com.google.common.primitives.Ints;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
+import org.apache.hadoop.hdfs.server.protocol.SlowPeerReports;
 import org.apache.hadoop.util.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -58,7 +61,7 @@ public class SlowPeerTracker {
 
   /**
    * Time duration after which a report is considered stale. This is
-   * set to DFS_DATANODE_SLOW_PEER_REPORT_INTERVAL_KEY * 3 i.e.
+   * set to DFS_DATANODE_OUTLIERS_REPORT_INTERVAL_KEY * 3 i.e.
    * maintained for at least two successive reports.
    */
   private final long reportValidityMs;
@@ -70,14 +73,18 @@ public class SlowPeerTracker {
   private final Timer timer;
 
   /**
+   * ObjectWriter to convert JSON reports to String.
+   */
+  private static final ObjectWriter WRITER = new ObjectMapper().writer();
+  /**
    * Number of nodes to include in JSON report. We will return nodes with
    * the highest number of votes from peers.
    */
-  private static final int MAX_NODES_TO_REPORT = 5;
+  private final int maxNodesToReport;
 
   /**
    * Information about peers that have reported a node as being slow.
-   * Each outer map entry is a map of (DatanodeId) -> (timestamp),
+   * Each outer map entry is a map of (DatanodeId) {@literal ->} (timestamp),
    * mapping reporting nodes to the timestamp of the last report from
    * that node.
    *
@@ -94,9 +101,12 @@ public class SlowPeerTracker {
     this.timer = timer;
     this.allReports = new ConcurrentHashMap<>();
     this.reportValidityMs = conf.getTimeDuration(
-        DFSConfigKeys.DFS_DATANODE_SLOW_PEERS_REPORT_INTERVAL_KEY,
-        DFSConfigKeys.DFS_DATANODE_SLOW_PEERS_REPORT_INTERVAL_DEFAULT,
+        DFSConfigKeys.DFS_DATANODE_OUTLIERS_REPORT_INTERVAL_KEY,
+        DFSConfigKeys.DFS_DATANODE_OUTLIERS_REPORT_INTERVAL_DEFAULT,
         TimeUnit.MILLISECONDS) * 3;
+    this.maxNodesToReport = conf.getInt(
+        DFSConfigKeys.DFS_DATANODE_MAX_NODES_TO_REPORT_KEY,
+        DFSConfigKeys.DFS_DATANODE_MAX_NODES_TO_REPORT_DEFAULT);
   }
 
   /**
@@ -141,7 +151,7 @@ public class SlowPeerTracker {
   /**
    * Retrieve all reports for all nodes. Stale reports are excluded.
    *
-   * @return map from SlowNodeId -> (set of nodes reporting peers).
+   * @return map from SlowNodeId {@literal ->} (set of nodes reporting peers).
    */
   public Map<String, SortedSet<String>> getReportsForAllDataNodes() {
     if (allReports.isEmpty()) {
@@ -187,10 +197,9 @@ public class SlowPeerTracker {
    */
   public String getJson() {
     Collection<ReportForJson> validReports = getJsonReports(
-        MAX_NODES_TO_REPORT);
-    ObjectMapper objectMapper = new ObjectMapper();
+        maxNodesToReport);
     try {
-      return objectMapper.writeValueAsString(validReports);
+      return WRITER.writeValueAsString(validReports);
     } catch (JsonProcessingException e) {
       // Failed to serialize. Don't log the exception call stack.
       LOG.debug("Failed to serialize statistics" + e);
@@ -223,6 +232,23 @@ public class SlowPeerTracker {
     public SortedSet<String> getReportingNodes() {
       return reportingNodes;
     }
+  }
+
+  /**
+   * Returns all tracking slow peers.
+   * @param numNodes
+   * @return
+   */
+  public ArrayList<String> getSlowNodes(int numNodes) {
+    Collection<ReportForJson> jsonReports = getJsonReports(numNodes);
+    ArrayList<String> slowNodes = new ArrayList<>();
+    for (ReportForJson jsonReport : jsonReports) {
+      slowNodes.add(jsonReport.getSlowNode());
+    }
+    if (!slowNodes.isEmpty()) {
+      LOG.warn("Slow nodes list: " + slowNodes);
+    }
+    return slowNodes;
   }
 
   /**

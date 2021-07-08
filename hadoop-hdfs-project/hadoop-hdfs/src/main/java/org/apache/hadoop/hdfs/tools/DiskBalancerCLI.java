@@ -21,6 +21,7 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
+import org.apache.hadoop.HadoopIllegalArgumentException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
@@ -37,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.PrintStream;
+import java.util.Arrays;
 
 /**
  * DiskBalancer is a tool that can be used to ensure that data is spread evenly
@@ -84,6 +86,13 @@ public class DiskBalancerCLI extends Configured implements Tool {
    * Executes a given plan file on the target datanode.
    */
   public static final String EXECUTE = "execute";
+
+  /**
+   * Skips date check(now by default the plan is valid for 24 hours), and force
+   * execute the plan.
+   */
+  public static final String SKIPDATECHECK = "skipDateCheck";
+
   /**
    * The report command prints out a disk fragmentation report about the data
    * cluster. By default it prints the DEFAULT_TOP machines names with high
@@ -165,7 +174,9 @@ public class DiskBalancerCLI extends Configured implements Tool {
     try {
       res = ToolRunner.run(shell, argv);
     } catch (Exception ex) {
-      LOG.error(ex.toString());
+      String msg = String.format("Exception thrown while running %s.",
+          DiskBalancerCLI.class.getSimpleName());
+      LOG.error(msg, ex);
       res = 1;
     }
     System.exit(res);
@@ -182,7 +193,13 @@ public class DiskBalancerCLI extends Configured implements Tool {
   public int run(String[] args) throws Exception {
     Options opts = getOpts();
     CommandLine cmd = parseArgs(args, opts);
-    return dispatch(cmd, opts);
+    String[] cmdArgs = cmd.getArgs();
+    if (cmdArgs.length > 2) {
+      throw new HadoopIllegalArgumentException(
+          "Invalid or extra Arguments: " + Arrays
+              .toString(Arrays.copyOfRange(cmdArgs, 2, cmdArgs.length)));
+    }
+    return dispatch(cmd);
   }
 
   /**
@@ -342,7 +359,15 @@ public class DiskBalancerCLI extends Configured implements Tool {
             "submits it for execution by the datanode.")
         .create();
     getExecuteOptions().addOption(execute);
+
+
+    Option skipDateCheck = OptionBuilder.withLongOpt(SKIPDATECHECK)
+        .withDescription("skips the date check and force execute the plan")
+        .create();
+    getExecuteOptions().addOption(skipDateCheck);
+
     opt.addOption(execute);
+    opt.addOption(skipDateCheck);
   }
 
   /**
@@ -444,10 +469,8 @@ public class DiskBalancerCLI extends Configured implements Tool {
    * Dispatches calls to the right command Handler classes.
    *
    * @param cmd  - CommandLine
-   * @param opts options of command line
-   * @param out  the output stream used for printing
    */
-  private int dispatch(CommandLine cmd, Options opts)
+  private int dispatch(CommandLine cmd)
       throws Exception {
     Command dbCmd = null;
     try {

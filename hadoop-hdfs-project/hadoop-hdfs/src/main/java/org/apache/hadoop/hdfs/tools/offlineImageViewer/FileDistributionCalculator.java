@@ -33,7 +33,7 @@ import org.apache.hadoop.hdfs.server.namenode.FsImageProto.INodeSection;
 import org.apache.hadoop.util.LimitInputStream;
 import org.apache.hadoop.util.StringUtils;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 /**
  * This is the tool for analyzing file sizes in the namespace image. In order to
@@ -160,8 +160,8 @@ final class FileDistributionCalculator {
               + StringUtils.byteDesc(((long) (i == 0 ? 0 : i - 1) * steps))
               + ", "
               + StringUtils.byteDesc((long)
-                  (i == distribution.length - 1 ? maxFileSize : i * steps))
-                  + "]\t" + distribution[i]);
+                  (i == distribution.length - 1 ? maxFileSize :
+                      (long) i * steps)) + "]\t" + distribution[i]);
         } else {
           out.print(((long) i * steps) + "\t" + distribution[i]);
         }

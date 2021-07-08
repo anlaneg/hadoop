@@ -26,8 +26,8 @@ import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.exceptions.YarnException;
-import org.apache.hadoop.yarn.logaggregation.ContainerLogType;
-import org.apache.hadoop.yarn.logaggregation.PerContainerLogFileInfo;
+import org.apache.hadoop.yarn.logaggregation.ContainerLogAggregationType;
+import org.apache.hadoop.yarn.logaggregation.ContainerLogFileInfo;
 import org.apache.hadoop.yarn.server.nodemanager.Context;
 import org.apache.hadoop.yarn.server.nodemanager.webapp.ContainerLogsUtils;
 import org.apache.hadoop.yarn.server.webapp.dao.ContainerLogsInfo;
@@ -47,7 +47,7 @@ public class NMContainerLogsInfo extends ContainerLogsInfo {
 
   public NMContainerLogsInfo(final Context nmContext,
       final ContainerId containerId, String remoteUser,
-      ContainerLogType logType) throws YarnException {
+      ContainerLogAggregationType logType) throws YarnException {
     this.logType = logType.toString();
     this.containerId = containerId.toString();
     this.nodeId = nmContext.getNodeId().toString();
@@ -55,10 +55,10 @@ public class NMContainerLogsInfo extends ContainerLogsInfo {
         containerId, remoteUser, nmContext);
   }
 
-  private static List<PerContainerLogFileInfo> getContainerLogsInfo(
+  private static List<ContainerLogFileInfo> getContainerLogsInfo(
       ContainerId id, String remoteUser, Context nmContext)
       throws YarnException {
-    List<PerContainerLogFileInfo> logFiles = new ArrayList<>();
+    List<ContainerLogFileInfo> logFiles = new ArrayList<>();
     List<File> logDirs = ContainerLogsUtils.getContainerLogDirs(
         id, remoteUser, nmContext);
     for (File containerLogsDir : logDirs) {
@@ -66,7 +66,7 @@ public class NMContainerLogsInfo extends ContainerLogsInfo {
       if (logs != null) {
         for (File log : logs) {
           if (log.isFile()) {
-            PerContainerLogFileInfo logMeta = new PerContainerLogFileInfo(
+            ContainerLogFileInfo logMeta = new ContainerLogFileInfo(
                 log.getName(), Long.toString(log.length()),
                 Times.format(log.lastModified()));
             logFiles.add(logMeta);

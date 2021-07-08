@@ -26,19 +26,25 @@ import java.security.GeneralSecurityException;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.fs.CanSetDropBehind;
+import org.apache.hadoop.fs.StreamCapabilities;
 import org.apache.hadoop.fs.Syncable;
+import org.apache.hadoop.fs.statistics.IOStatistics;
+import org.apache.hadoop.fs.statistics.IOStatisticsSource;
+import org.apache.hadoop.fs.impl.StoreImplementationUtils;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+
+import static org.apache.hadoop.fs.statistics.IOStatisticsSupport.retrieveIOStatistics;
 
 /**
  * CryptoOutputStream encrypts data. It is not thread-safe. AES CTR mode is
  * required in order to ensure that the plain text and cipher text have a 1:1
  * mapping. The encryption is buffer based. The key points of the encryption are
  * (1) calculating counter and (2) padding through stream position.
- * <p/>
+ * <p>
  * counter = base + pos/(algorithm blocksize); 
  * padding = pos%(algorithm blocksize); 
- * <p/>
+ * <p>
  * The underlying stream offset is maintained as state.
  *
  * Note that while some of this class' methods are synchronized, this is just to
@@ -47,7 +53,7 @@ import com.google.common.base.Preconditions;
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
 public class CryptoOutputStream extends FilterOutputStream implements 
-    Syncable, CanSetDropBehind {
+    Syncable, CanSetDropBehind, StreamCapabilities, IOStatisticsSource {
   private final byte[] oneByteBuf = new byte[1];
   private final CryptoCodec codec;
   private final Encryptor encryptor;
@@ -239,6 +245,7 @@ public class CryptoOutputStream extends FilterOutputStream implements
       flush();
       if (closeOutputStream) {
         super.close();
+        codec.close();
       }
       freeBuffers();
     } finally {
@@ -252,7 +259,9 @@ public class CryptoOutputStream extends FilterOutputStream implements
    */
   @Override
   public synchronized void flush() throws IOException {
-    checkStream();
+    if (closed) {
+      return;
+    }
     encrypt();
     super.flush();
   }
@@ -300,5 +309,15 @@ public class CryptoOutputStream extends FilterOutputStream implements
   private void freeBuffers() {
     CryptoStreamUtils.freeDB(inBuffer);
     CryptoStreamUtils.freeDB(outBuffer);
+  }
+
+  @Override
+  public boolean hasCapability(String capability) {
+    return StoreImplementationUtils.hasCapability(out, capability);
+  }
+
+  @Override
+  public IOStatistics getIOStatistics() {
+    return retrieveIOStatistics(out);
   }
 }

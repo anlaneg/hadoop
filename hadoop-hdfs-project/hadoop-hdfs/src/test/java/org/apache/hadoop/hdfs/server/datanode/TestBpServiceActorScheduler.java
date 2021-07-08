@@ -18,8 +18,8 @@
 
 package org.apache.hadoop.hdfs.server.datanode;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hdfs.server.datanode.BPServiceActor.Scheduler;
 import org.junit.Rule;
 import org.junit.Test;
@@ -43,7 +43,8 @@ import static org.mockito.Mockito.spy;
  * using a few different values .
  */
 public class TestBpServiceActorScheduler {
-  protected static final Log LOG = LogFactory.getLog(TestBpServiceActorScheduler.class);
+  protected static final Logger LOG =
+      LoggerFactory.getLogger(TestBpServiceActorScheduler.class);
 
   @Rule
   public Timeout timeout = new Timeout(300000);
@@ -51,7 +52,7 @@ public class TestBpServiceActorScheduler {
   private static final long HEARTBEAT_INTERVAL_MS = 5000;      // 5 seconds
   private static final long LIFELINE_INTERVAL_MS = 3 * HEARTBEAT_INTERVAL_MS;
   private static final long BLOCK_REPORT_INTERVAL_MS = 10000;  // 10 seconds
-  private static final long SLOW_PEER_REPORT_INTERVAL_MS = 10000;  // 10 seconds
+  private static final long OUTLIER_REPORT_INTERVAL_MS = 10000;  // 10 seconds
   private final Random random = new Random(System.nanoTime());
 
   @Test
@@ -67,7 +68,7 @@ public class TestBpServiceActorScheduler {
   public void testScheduleBlockReportImmediate() {
     for (final long now : getTimestamps()) {
       Scheduler scheduler = makeMockScheduler(now);
-      scheduler.scheduleBlockReport(0);
+      scheduler.scheduleBlockReport(0, true);
       assertTrue(scheduler.resetBlockReportTime);
       assertThat(scheduler.nextBlockReportTime, is(now));
     }
@@ -78,7 +79,7 @@ public class TestBpServiceActorScheduler {
     for (final long now : getTimestamps()) {
       Scheduler scheduler = makeMockScheduler(now);
       final long delayMs = 10;
-      scheduler.scheduleBlockReport(delayMs);
+      scheduler.scheduleBlockReport(delayMs, true);
       assertTrue(scheduler.resetBlockReportTime);
       assertTrue(scheduler.nextBlockReportTime - now >= 0);
       assertTrue(scheduler.nextBlockReportTime - (now + delayMs) < 0);
@@ -182,15 +183,15 @@ public class TestBpServiceActorScheduler {
   }
 
   @Test
-  public void testSlowPeerReportScheduling() {
+  public void testOutlierReportScheduling() {
     for (final long now : getTimestamps()) {
       Scheduler scheduler = makeMockScheduler(now);
-      assertTrue(scheduler.isSlowPeersReportDue(now));
-      scheduler.scheduleNextSlowPeerReport();
-      assertFalse(scheduler.isSlowPeersReportDue(now));
-      assertFalse(scheduler.isSlowPeersReportDue(now + 1));
-      assertTrue(scheduler.isSlowPeersReportDue(
-          now + SLOW_PEER_REPORT_INTERVAL_MS));
+      assertTrue(scheduler.isOutliersReportDue(now));
+      scheduler.scheduleNextOutlierReport();
+      assertFalse(scheduler.isOutliersReportDue(now));
+      assertFalse(scheduler.isOutliersReportDue(now + 1));
+      assertTrue(scheduler.isOutliersReportDue(
+          now + OUTLIER_REPORT_INTERVAL_MS));
     }
   }
 
@@ -198,11 +199,11 @@ public class TestBpServiceActorScheduler {
     LOG.info("Using now = " + now);
     Scheduler mockScheduler = spy(new Scheduler(
         HEARTBEAT_INTERVAL_MS, LIFELINE_INTERVAL_MS,
-        BLOCK_REPORT_INTERVAL_MS, SLOW_PEER_REPORT_INTERVAL_MS));
+        BLOCK_REPORT_INTERVAL_MS, OUTLIER_REPORT_INTERVAL_MS));
     doReturn(now).when(mockScheduler).monotonicNow();
     mockScheduler.nextBlockReportTime = now;
     mockScheduler.nextHeartbeatTime = now;
-    mockScheduler.nextSlowPeersReportTime = now;
+    mockScheduler.nextOutliersReportTime = now;
     return mockScheduler;
   }
 

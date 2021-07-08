@@ -22,24 +22,25 @@ import java.util.Iterator;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hdfs.nfs.conf.NfsConfigKeys;
 import org.apache.hadoop.hdfs.nfs.conf.NfsConfiguration;
 import org.apache.hadoop.nfs.nfs3.FileHandle;
 import org.apache.hadoop.util.Daemon;
 import org.apache.hadoop.util.Time;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
 
 /**
  * A cache saves OpenFileCtx objects for different users. Each cache entry is
  * used to maintain the writing context for a single file.
  */
 class OpenFileCtxCache {
-  private static final Log LOG = LogFactory.getLog(OpenFileCtxCache.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(OpenFileCtxCache.class);
   // Insert and delete with openFileMap are synced
   private final ConcurrentMap<FileHandle, OpenFileCtx> openFileMap = Maps
       .newConcurrentMap();
@@ -156,7 +157,7 @@ class OpenFileCtxCache {
       Entry<FileHandle, OpenFileCtx> pairs = it.next();
       FileHandle handle = pairs.getKey();
       OpenFileCtx ctx = pairs.getValue();
-      if (!ctx.streamCleanup(handle.getFileId(), streamTimeout)) {
+      if (!ctx.streamCleanup(handle, streamTimeout)) {
         continue;
       }
 
@@ -164,10 +165,10 @@ class OpenFileCtxCache {
       synchronized (this) {
         OpenFileCtx ctx2 = openFileMap.get(handle);
         if (ctx2 != null) {
-          if (ctx2.streamCleanup(handle.getFileId(), streamTimeout)) {
+          if (ctx2.streamCleanup(handle, streamTimeout)) {
             openFileMap.remove(handle);
             if (LOG.isDebugEnabled()) {
-              LOG.debug("After remove stream " + handle.getFileId()
+              LOG.debug("After remove stream " + handle.dumpFileHandle()
                   + ", the stream number:" + size());
             }
             ctxToRemove.add(ctx2);

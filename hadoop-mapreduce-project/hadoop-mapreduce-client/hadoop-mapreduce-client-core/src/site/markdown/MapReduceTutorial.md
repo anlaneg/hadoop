@@ -206,6 +206,12 @@ For example,
 
 Here, the files dir1/dict.txt and dir2/dict.txt can be accessed by tasks using the symbolic names dict1 and dict2 respectively. The archive mytar.tgz will be placed and unarchived into a directory by the name "tgzdir".
 
+Applications can specify environment variables for mapper, reducer, and application master tasks by specifying them on the command line using the options -Dmapreduce.map.env, -Dmapreduce.reduce.env, and -Dyarn.app.mapreduce.am.env, respectively.
+
+For example the following sets environment variables FOO_VAR=bar and LIST_VAR=a,b,c for the mappers and reducers,
+
+    bin/hadoop jar hadoop-mapreduce-examples-<ver>.jar wordcount -Dmapreduce.map.env.FOO_VAR=bar -Dmapreduce.map.env.LIST_VAR=a,b,c -Dmapreduce.reduce.env.FOO_VAR=bar -Dmapreduce.reduce.env.LIST_VAR=a,b,c input output
+
 ### Walk-through
 
 The `WordCount` application is quite straight-forward.
@@ -417,7 +423,7 @@ indicates the set of input files
 [FileInputFormat.addInputPath(Job, Path)](../../api/org/apache/hadoop/mapreduce/lib/input/FileInputFormat.html)) and
 ([FileInputFormat.setInputPaths(Job, String...)](../../api/org/apache/hadoop/mapreduce/lib/input/FileInputFormat.html)/
 [FileInputFormat.addInputPaths(Job, String))](../../api/org/apache/hadoop/mapreduce/lib/input/FileInputFormat.html) and where the output files should be written
-([FileOutputFormat.setOutputPath(Path)](../../api/org/apache/hadoop/mapreduce/lib/input/FileOutputFormat.html)).
+([FileOutputFormat.setOutputPath(Path)](../../api/org/apache/hadoop/mapreduce/lib/output/FileOutputFormat.html)).
 
 Optionally, `Job` is used to specify other advanced facets of the job such as the `Comparator` to be used, files to be put in the `DistributedCache`, whether intermediate and/or job outputs are to be compressed (and how), whether job tasks can be executed in a *speculative* manner
 ([setMapSpeculativeExecution(boolean)](../../api/org/apache/hadoop/mapreduce/Job.html))/
@@ -1091,7 +1097,7 @@ Sure enough, the output:
     goodbye 1
     hadoop 2
     hello 2
-    horld 2
+    world 2
 
 #### Highlights
 

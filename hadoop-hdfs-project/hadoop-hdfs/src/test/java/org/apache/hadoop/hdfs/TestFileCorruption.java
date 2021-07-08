@@ -18,7 +18,7 @@
 
 package org.apache.hadoop.hdfs;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo.DatanodeInfoBuilder;
 import org.apache.hadoop.hdfs.server.blockmanagement.DatanodeStorageInfo;
@@ -55,18 +55,18 @@ import org.apache.hadoop.hdfs.server.protocol.DatanodeRegistration;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeStorage;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.test.PathUtils;
-import org.apache.log4j.Level;
 import org.junit.Test;
 import org.slf4j.Logger;
+import org.slf4j.event.Level;
 
 /**
  * A JUnit test for corrupted file handling.
  */
 public class TestFileCorruption {
   {
-    DFSTestUtil.setNameNodeLogLevel(Level.ALL);
-    GenericTestUtils.setLogLevel(DataNode.LOG, Level.ALL);
-    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.ALL);
+    DFSTestUtil.setNameNodeLogLevel(Level.TRACE);
+    GenericTestUtils.setLogLevel(DataNode.LOG, Level.TRACE);
+    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.TRACE);
   }
   static Logger LOG = NameNode.stateChangeLog;
 
@@ -275,12 +275,13 @@ public class TestFileCorruption {
       out.write(outBuffer, 0, bufferSize);
       out.close();
       dfs.setReplication(filePath, (short) 10);
+      cluster.triggerBlockReports();
       // underreplicated Blocks should be one after setrep
       GenericTestUtils.waitFor(new Supplier<Boolean>() {
         @Override public Boolean get() {
           try {
             return cluster.getNamesystem().getBlockManager()
-                .getUnderReplicatedBlocksCount() == 1;
+                .getLowRedundancyBlocksCount() == 1;
           } catch (Exception e) {
             e.printStackTrace();
             return false;

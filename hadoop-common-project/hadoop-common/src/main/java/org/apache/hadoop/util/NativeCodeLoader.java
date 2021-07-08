@@ -18,10 +18,10 @@
 
 package org.apache.hadoop.util;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A helper to load the native hadoop code i.e. libhadoop.so.
@@ -33,8 +33,8 @@ import org.apache.hadoop.classification.InterfaceStability;
 @InterfaceStability.Unstable
 public final class NativeCodeLoader {
 
-  private static final Log LOG =
-    LogFactory.getLog(NativeCodeLoader.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(NativeCodeLoader.class);
   
   private static boolean nativeCodeLoaded = false;
   
@@ -73,11 +73,6 @@ public final class NativeCodeLoader {
   public static boolean isNativeCodeLoaded() {
     return nativeCodeLoaded;
   }
-
-  /**
-   * Returns true only if this build was compiled with support for snappy.
-   */
-  public static native boolean buildSupportsSnappy();
 
   /**
    * Returns true only if this build was compiled with support for ISA-L.

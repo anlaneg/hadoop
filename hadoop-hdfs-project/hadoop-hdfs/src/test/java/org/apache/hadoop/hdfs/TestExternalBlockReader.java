@@ -17,9 +17,9 @@
  */
 package org.apache.hadoop.hdfs;
 
-import com.google.common.primitives.Ints;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.primitives.Ints;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.Path;
@@ -39,8 +39,8 @@ import java.util.LinkedList;
 import java.util.UUID;
 
 public class TestExternalBlockReader {
-  private static final Log LOG =
-          LogFactory.getLog(TestExternalBlockReader.class);
+  private static final Logger LOG =
+          LoggerFactory.getLogger(TestExternalBlockReader.class);
 
   private static long SEED = 1234;
 

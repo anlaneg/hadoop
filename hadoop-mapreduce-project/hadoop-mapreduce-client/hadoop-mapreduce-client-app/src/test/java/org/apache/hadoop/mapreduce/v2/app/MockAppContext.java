@@ -31,7 +31,7 @@ import org.apache.hadoop.yarn.event.EventHandler;
 import org.apache.hadoop.yarn.security.client.ClientToAMTokenSecretManager;
 import org.apache.hadoop.yarn.util.Clock;
 
-import com.google.common.collect.Maps;
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
 
 public class MockAppContext implements AppContext {
   final ApplicationAttemptId appAttemptID;
@@ -152,6 +152,16 @@ public class MockAppContext implements AppContext {
   @Override
   public TaskAttemptFinishingMonitor getTaskAttemptFinishingMonitor() {
       return null;
+  }
+
+  @Override
+  public String getHistoryUrl() {
+    return null;
+  }
+
+  @Override
+  public void setHistoryUrl(String historyUrl) {
+    return;
   }
 
 }

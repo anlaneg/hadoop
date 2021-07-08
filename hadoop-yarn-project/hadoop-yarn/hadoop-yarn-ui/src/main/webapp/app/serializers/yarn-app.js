@@ -42,22 +42,26 @@ export default DS.JSONAPISerializer.extend({
           user: payload.user,
           queue: payload.queue,
           state: payload.state,
-          startTime: Converter.timeStampToDate(payload.startedTime),
-          elapsedTime: Converter.msToElapsedTime(payload.elapsedTime),
-          finishedTime: Converter.timeStampToDate(payload.finishedTime),
+          startTime: payload.startedTime, // will be formatted in yarn-app model
+          elapsedTime: payload.elapsedTime,
+          finishedTime: payload.finishedTime, // will be formatted in yarn-app model
           finalStatus: payload.finalStatus,
           progress: payload.progress,
           applicationType: payload.applicationType,
-          diagnostics: payload.diagnostics,
-          amContainerLogs: payload.amContainerLogs,
+          applicationTags:
+              (payload.applicationTags && payload.applicationTags !== 'null')?
+                  payload.applicationTags : 'N/A',
+          diagnostics: (payload.diagnostics && payload.diagnostics !== 'null')? payload.diagnostics : '',
           amHostHttpAddress: payload.amHostHttpAddress,
+          masterNodeId: payload.masterNodeId,
           logAggregationStatus: payload.logAggregationStatus,
           unmanagedApplication: payload.unmanagedApplication,
           amNodeLabelExpression: payload.amNodeLabelExpression,
-          priority: payload.priority,
+          priority: (payload.priority !== undefined)? payload.priority : 'N/A',
           allocatedMB: payload.allocatedMB,
           allocatedVCores: payload.allocatedVCores,
           runningContainers: payload.runningContainers,
+          resourceRequests: payload.resourceRequests,
           memorySeconds: payload.memorySeconds,
           vcoreSeconds: payload.vcoreSeconds,
           preemptedResourceMB: payload.preemptedResourceMB,
@@ -68,7 +72,9 @@ export default DS.JSONAPISerializer.extend({
           queueUsagePercentage: payload.queueUsagePercentage,
           currentAppAttemptId: payload.currentAppAttemptId,
           remainingTimeoutInSeconds: timeoutInSecs,
-          applicationExpiryTime: appExpiryTime
+          applicationExpiryTime: appExpiryTime,
+          trackingUI : payload.trackingUI,
+          trackingUrl : payload.trackingUrl
         }
       };
 

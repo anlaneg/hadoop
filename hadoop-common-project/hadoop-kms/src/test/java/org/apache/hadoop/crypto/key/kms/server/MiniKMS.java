@@ -26,7 +26,7 @@ import java.io.OutputStream;
 import java.io.Writer;
 import java.net.URL;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -105,15 +105,11 @@ public class MiniKMS {
 
   private void copyResource(String inputResourceName, File outputFile) throws
       IOException {
-    InputStream is = null;
-    OutputStream os = null;
-    try {
-      is = ThreadUtil.getResourceAsStream(inputResourceName);
-      os = new FileOutputStream(outputFile);
+    InputStream is = ThreadUtil.getResourceAsStream(inputResourceName);
+    try (OutputStream os = new FileOutputStream(outputFile)) {
       IOUtils.copy(is, os);
     } finally {
       IOUtils.closeQuietly(is);
-      IOUtils.closeQuietly(os);
     }
   }
 

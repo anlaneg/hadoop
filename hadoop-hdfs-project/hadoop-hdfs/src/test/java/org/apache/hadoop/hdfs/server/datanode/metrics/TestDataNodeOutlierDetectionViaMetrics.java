@@ -18,17 +18,22 @@
 
 package org.apache.hadoop.hdfs.server.datanode.metrics;
 
+import java.util.function.Supplier;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hdfs.HdfsConfiguration;
+import org.apache.hadoop.metrics2.lib.MetricsTestHelper;
 import org.apache.hadoop.test.GenericTestUtils;
-import org.apache.log4j.Level;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.core.Is.is;
 import static org.junit.Assert.assertThat;
@@ -54,13 +59,17 @@ public class TestDataNodeOutlierDetectionViaMetrics {
   private static final int ROLLING_AVERAGE_WINDOWS = 10;
   private static final int SLOW_NODE_LATENCY_MS = 20_000;
   private static final int FAST_NODE_MAX_LATENCY_MS = 5;
+  private static final long MIN_OUTLIER_DETECTION_PEERS = 10;
 
   private Random random = new Random(System.currentTimeMillis());
 
+  private Configuration conf;
+
   @Before
   public void setup() {
-    GenericTestUtils.setLogLevel(DataNodePeerMetrics.LOG, Level.ALL);
-    GenericTestUtils.setLogLevel(SlowNodeDetector.LOG, Level.ALL);
+    GenericTestUtils.setLogLevel(DataNodePeerMetrics.LOG, Level.TRACE);
+    GenericTestUtils.setLogLevel(OutlierDetector.LOG, Level.TRACE);
+    conf = new HdfsConfiguration();
   }
 
   /**
@@ -71,14 +80,25 @@ public class TestDataNodeOutlierDetectionViaMetrics {
     final String slowNodeName = "SlowNode";
 
     DataNodePeerMetrics peerMetrics = new DataNodePeerMetrics(
-        "PeerMetrics-For-Test", WINDOW_INTERVAL_SECONDS,
-        ROLLING_AVERAGE_WINDOWS);
+        "PeerMetrics-For-Test", conf);
+
+    MetricsTestHelper.replaceRollingAveragesScheduler(
+        peerMetrics.getSendPacketDownstreamRollingAverages(),
+        ROLLING_AVERAGE_WINDOWS,
+        WINDOW_INTERVAL_SECONDS, TimeUnit.SECONDS);
 
     injectFastNodesSamples(peerMetrics);
     injectSlowNodeSamples(peerMetrics, slowNodeName);
 
     // Trigger a snapshot.
     peerMetrics.dumpSendPacketDownstreamAvgInfoAsJson();
+
+    GenericTestUtils.waitFor(new Supplier<Boolean>() {
+      @Override
+      public Boolean get() {
+        return peerMetrics.getOutliers().size() > 0;
+      }
+    }, 500, 100_000);
 
     final Map<String, Double> outliers = peerMetrics.getOutliers();
     LOG.info("Got back outlier nodes: {}", outliers);
@@ -92,8 +112,12 @@ public class TestDataNodeOutlierDetectionViaMetrics {
   @Test
   public void testWithNoOutliers() throws Exception {
     DataNodePeerMetrics peerMetrics = new DataNodePeerMetrics(
-        "PeerMetrics-For-Test", WINDOW_INTERVAL_SECONDS,
-        ROLLING_AVERAGE_WINDOWS);
+        "PeerMetrics-For-Test", conf);
+
+    MetricsTestHelper.replaceRollingAveragesScheduler(
+        peerMetrics.getSendPacketDownstreamRollingAverages(),
+        ROLLING_AVERAGE_WINDOWS,
+        WINDOW_INTERVAL_SECONDS, TimeUnit.SECONDS);
 
     injectFastNodesSamples(peerMetrics);
 
@@ -111,12 +135,11 @@ public class TestDataNodeOutlierDetectionViaMetrics {
    */
   public void injectFastNodesSamples(DataNodePeerMetrics peerMetrics) {
     for (int nodeIndex = 0;
-         nodeIndex < SlowNodeDetector.getMinOutlierDetectionPeers();
-         ++nodeIndex) {
+         nodeIndex < MIN_OUTLIER_DETECTION_PEERS; ++nodeIndex) {
       final String nodeName = "FastNode-" + nodeIndex;
       LOG.info("Generating stats for node {}", nodeName);
       for (int i = 0;
-           i < 2 * DataNodePeerMetrics.MIN_OUTLIER_DETECTION_SAMPLES;
+           i < 2 * peerMetrics.getMinOutlierDetectionSamples();
            ++i) {
         peerMetrics.addSendPacketDownstream(
             nodeName, random.nextInt(FAST_NODE_MAX_LATENCY_MS));
@@ -133,7 +156,7 @@ public class TestDataNodeOutlierDetectionViaMetrics {
 
     // And the one slow node.
     for (int i = 0;
-         i < 2 * DataNodePeerMetrics.MIN_OUTLIER_DETECTION_SAMPLES;
+         i < 2 * peerMetrics.getMinOutlierDetectionSamples();
          ++i) {
       peerMetrics.addSendPacketDownstream(
           slowNodeName, SLOW_NODE_LATENCY_MS);

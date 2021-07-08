@@ -24,17 +24,16 @@ import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
-import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.logaggregation.ContainerLogMeta;
-import org.apache.hadoop.yarn.logaggregation.ContainerLogType;
-import org.apache.hadoop.yarn.logaggregation.PerContainerLogFileInfo;
+import org.apache.hadoop.yarn.logaggregation.ContainerLogAggregationType;
+import org.apache.hadoop.yarn.logaggregation.ContainerLogFileInfo;
 
 /**
  * {@code ContainerLogsInfo} includes the log meta-data of containers.
  * <p>
  * The container log meta-data includes details such as:
  * <ul>
- *   <li>A list of {@link PerContainerLogFileInfo}.</li>
+ *   <li>A list of {@link ContainerLogFileInfo}.</li>
  *   <li>The container Id.</li>
  *   <li>The NodeManager Id.</li>
  *   <li>The logType: could be local or aggregated</li>
@@ -46,9 +45,9 @@ import org.apache.hadoop.yarn.logaggregation.PerContainerLogFileInfo;
 public class ContainerLogsInfo {
 
   @XmlElement(name = "containerLogInfo")
-  protected List<PerContainerLogFileInfo> containerLogsInfo;
+  protected List<ContainerLogFileInfo> containerLogsInfo;
 
-  @XmlElement(name = "logType")
+  @XmlElement(name = "logAggregationType")
   protected String logType;
 
   @XmlElement(name = "containerId")
@@ -60,16 +59,16 @@ public class ContainerLogsInfo {
   //JAXB needs this
   public ContainerLogsInfo() {}
 
-  public ContainerLogsInfo(ContainerLogMeta logMeta, ContainerLogType logType)
-      throws YarnException {
-    this.containerLogsInfo = new ArrayList<PerContainerLogFileInfo>(
+  public ContainerLogsInfo(ContainerLogMeta logMeta,
+      ContainerLogAggregationType logType) {
+    this.containerLogsInfo = new ArrayList<ContainerLogFileInfo>(
         logMeta.getContainerLogMeta());
     this.logType = logType.toString();
     this.containerId = logMeta.getContainerId();
     this.nodeId = logMeta.getNodeId();
   }
 
-  public List<PerContainerLogFileInfo> getContainerLogsInfo() {
+  public List<ContainerLogFileInfo> getContainerLogsInfo() {
     return this.containerLogsInfo;
   }
 

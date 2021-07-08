@@ -18,7 +18,7 @@
 
 package org.apache.hadoop.io.compress.zstd;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
@@ -159,7 +159,7 @@ public class ZStandardCompressor implements Compressor {
     }
 
     // have we consumed all input
-    if (keepUncompressedBuf && uncompressedDirectBufLen > 0) {
+    if (keepUncompressedBuf && uncompressedDirectBufLen - uncompressedDirectBufOff > 0) {
       return false;
     }
 
@@ -223,7 +223,7 @@ public class ZStandardCompressor implements Compressor {
     compressedDirectBuf.limit(n);
 
     // Check if we have consumed all input buffer
-    if (uncompressedDirectBufLen <= 0) {
+    if (uncompressedDirectBufLen - uncompressedDirectBufOff <= 0) {
       // consumed all input buffer
       keepUncompressedBuf = false;
       uncompressedDirectBuf.clear();
@@ -298,7 +298,7 @@ public class ZStandardCompressor implements Compressor {
   private native static void init(int level, long stream);
   private native int deflateBytesDirect(ByteBuffer src, int srcOffset,
       int srcLen, ByteBuffer dst, int dstLen);
-  private static native int getStreamSize();
+  private native static int getStreamSize();
   private native static void end(long strm);
   private native static void initIDs();
   public native static String getLibraryName();

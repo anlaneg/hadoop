@@ -33,7 +33,6 @@ import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FsTracer;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.BlockReader;
 import org.apache.hadoop.hdfs.client.impl.BlockReaderFactory;
@@ -65,9 +64,9 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.net.ServerSocketUtil;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.test.GenericTestUtils;
-import org.apache.log4j.Level;
 import org.junit.Assert;
 import org.junit.Test;
+import org.slf4j.event.Level;
 
 public class TestBlockTokenWithDFS {
 
@@ -78,7 +77,7 @@ public class TestBlockTokenWithDFS {
   private static final String FILE_TO_APPEND = "/fileToAppend.dat";
 
   {
-    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.ALL);
+    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.TRACE);
   }
 
   public static byte[] generateBytes(int fileSize){
@@ -167,7 +166,6 @@ public class TestBlockTokenWithDFS {
           setCachingStrategy(CachingStrategy.newDefaultStrategy()).
           setClientCacheContext(ClientContext.getFromConf(conf)).
           setConfiguration(conf).
-          setTracer(FsTracer.get(conf)).
           setRemotePeerFactory(new RemotePeerFactory() {
             @Override
             public Peer newConnectedPeer(InetSocketAddress addr,
@@ -353,7 +351,7 @@ public class TestBlockTokenWithDFS {
     try {
       // prefer non-ephemeral port to avoid port collision on restartNameNode
       cluster = new MiniDFSCluster.Builder(conf)
-          .nameNodePort(ServerSocketUtil.getPort(19820, 100))
+          .nameNodePort(ServerSocketUtil.getPort(18020, 100))
           .nameNodeHttpPort(ServerSocketUtil.getPort(19870, 100))
           .numDataNodes(numDataNodes)
           .build();

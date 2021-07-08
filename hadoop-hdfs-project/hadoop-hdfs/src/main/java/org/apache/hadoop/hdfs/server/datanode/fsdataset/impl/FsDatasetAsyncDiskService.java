@@ -30,12 +30,13 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hdfs.protocol.ExtendedBlock;
 import org.apache.hadoop.hdfs.server.datanode.DataNode;
 import org.apache.hadoop.hdfs.server.datanode.DatanodeUtil;
 import org.apache.hadoop.hdfs.server.datanode.ReplicaInfo;
+import org.apache.hadoop.hdfs.server.common.Storage.StorageDirectory;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.FsVolumeReference;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.ReplicaOutputStreams;
 import org.apache.hadoop.hdfs.server.protocol.BlockCommand;
@@ -58,7 +59,8 @@ import org.apache.hadoop.io.nativeio.NativeIOException;
  * They should be combined.
  */
 class FsDatasetAsyncDiskService {
-  public static final Log LOG = LogFactory.getLog(FsDatasetAsyncDiskService.class);
+  public static final Logger LOG =
+      LoggerFactory.getLogger(FsDatasetAsyncDiskService.class);
   
   // ThreadPool core pool size
   private static final int CORE_THREADS_PER_VOLUME = 1;
@@ -137,7 +139,7 @@ class FsDatasetAsyncDiskService {
 
   /**
    * Stops AsyncDiskService for a volume.
-   * @param volume the root of the volume.
+   * @param storageId id of {@link StorageDirectory}.
    */
   synchronized void removeVolume(String storageId) {
     if (executors == null) {
@@ -165,18 +167,26 @@ class FsDatasetAsyncDiskService {
    * Execute the task sometime in the future, using ThreadPools.
    */
   synchronized void execute(FsVolumeImpl volume, Runnable task) {
-    if (executors == null) {
-      throw new RuntimeException("AsyncDiskService is already shutdown");
-    }
-    if (volume == null) {
-      throw new RuntimeException("A null volume does not have a executor");
-    }
-    ThreadPoolExecutor executor = executors.get(volume.getStorageID());
-    if (executor == null) {
-      throw new RuntimeException("Cannot find volume " + volume
-          + " for execution of task " + task);
-    } else {
-      executor.execute(task);
+    try {
+      if (executors == null) {
+        throw new RuntimeException("AsyncDiskService is already shutdown");
+      }
+      if (volume == null) {
+        throw new RuntimeException("A null volume does not have a executor");
+      }
+      ThreadPoolExecutor executor = executors.get(volume.getStorageID());
+      if (executor == null) {
+        throw new RuntimeException("Cannot find volume " + volume
+            + " for execution of task " + task);
+      } else {
+        executor.execute(task);
+      }
+    } catch (RuntimeException re) {
+      if (task instanceof ReplicaFileDeleteTask) {
+        IOUtils.cleanupWithLogger(null,
+            ((ReplicaFileDeleteTask) task).volumeRef);
+      }
+      throw re;
     }
   }
   
@@ -222,12 +232,25 @@ class FsDatasetAsyncDiskService {
   void deleteAsync(FsVolumeReference volumeRef, ReplicaInfo replicaToDelete,
       ExtendedBlock block, String trashDirectory) {
     LOG.info("Scheduling " + block.getLocalBlock()
-        + " replica " + replicaToDelete + " for deletion");
+        + " replica " + replicaToDelete + " on volume " +
+        replicaToDelete.getVolume() + " for deletion");
     ReplicaFileDeleteTask deletionTask = new ReplicaFileDeleteTask(
         volumeRef, replicaToDelete, block, trashDirectory);
     execute(((FsVolumeImpl) volumeRef.getVolume()), deletionTask);
   }
-  
+
+  /**
+   * Delete the block file and meta file from the disk synchronously, adjust
+   * dfsUsed statistics accordingly.
+   */
+  void deleteSync(FsVolumeReference volumeRef, ReplicaInfo replicaToDelete,
+      ExtendedBlock block, String trashDirectory) {
+    LOG.info("Deleting " + block.getLocalBlock() + " replica " + replicaToDelete);
+    ReplicaFileDeleteTask deletionTask = new ReplicaFileDeleteTask(volumeRef,
+        replicaToDelete, block, trashDirectory);
+    deletionTask.run();
+  }
+
   /** A task for deleting a block file and its associated meta file, as well
    *  as decrement the dfs usage of the volume.
    *  Optionally accepts a trash directory. If one is specified then the files
@@ -300,28 +323,31 @@ class FsDatasetAsyncDiskService {
 
     @Override
     public void run() {
-      final long blockLength = replicaToDelete.getBlockDataLength();
-      final long metaLength = replicaToDelete.getMetadataLength();
-      boolean result;
+      try {
+        final long blockLength = replicaToDelete.getBlockDataLength();
+        final long metaLength = replicaToDelete.getMetadataLength();
+        boolean result;
 
-      result = (trashDirectory == null) ? deleteFiles() : moveFiles();
+        result = (trashDirectory == null) ? deleteFiles() : moveFiles();
 
-      if (!result) {
-        LOG.warn("Unexpected error trying to "
-            + (trashDirectory == null ? "delete" : "move")
-            + " block " + block.getBlockPoolId() + " " + block.getLocalBlock()
-            + " at file " + replicaToDelete.getBlockURI() + ". Ignored.");
-      } else {
-        if(block.getLocalBlock().getNumBytes() != BlockCommand.NO_ACK){
-          datanode.notifyNamenodeDeletedBlock(block, volume.getStorageID());
+        if (!result) {
+          LOG.warn("Unexpected error trying to "
+              + (trashDirectory == null ? "delete" : "move")
+              + " block " + block.getBlockPoolId() + " " + block.getLocalBlock()
+              + " at file " + replicaToDelete.getBlockURI() + ". Ignored.");
+        } else {
+          if (block.getLocalBlock().getNumBytes() != BlockCommand.NO_ACK) {
+            datanode.notifyNamenodeDeletedBlock(block, volume.getStorageID());
+          }
+          volume.onBlockFileDeletion(block.getBlockPoolId(), blockLength);
+          volume.onMetaFileDeletion(block.getBlockPoolId(), metaLength);
+          LOG.info("Deleted " + block.getBlockPoolId() + " " +
+              block.getLocalBlock() + " URI " + replicaToDelete.getBlockURI());
         }
-        volume.onBlockFileDeletion(block.getBlockPoolId(), blockLength);
-        volume.onMetaFileDeletion(block.getBlockPoolId(), metaLength);
-        LOG.info("Deleted " + block.getBlockPoolId() + " "
-            + block.getLocalBlock() + " URI " + replicaToDelete.getBlockURI());
+        updateDeletedBlockId(block);
+      } finally {
+        IOUtils.cleanupWithLogger(null, this.volumeRef);
       }
-      updateDeletedBlockId(block);
-      IOUtils.cleanup(null, volumeRef);
     }
   }
   

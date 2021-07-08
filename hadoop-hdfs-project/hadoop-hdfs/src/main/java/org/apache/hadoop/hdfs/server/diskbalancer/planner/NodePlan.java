@@ -18,9 +18,10 @@
 package org.apache.hadoop.hdfs.server.diskbalancer.planner;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Preconditions;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 import java.io.IOException;
 import java.util.LinkedList;
@@ -38,6 +39,10 @@ public class NodePlan {
   private int port;
   private long timeStamp;
 
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectReader READER = MAPPER.readerFor(NodePlan.class);
+  private static final ObjectWriter WRITER = MAPPER.writerFor(
+      MAPPER.constructType(NodePlan.class));
   /**
    * returns timestamp when this plan was created.
    *
@@ -153,8 +158,7 @@ public class NodePlan {
    * @throws IOException
    */
   public static NodePlan parseJson(String json) throws IOException {
-    ObjectMapper mapper = new ObjectMapper();
-    return mapper.readValue(json, NodePlan.class);
+    return READER.readValue(json);
   }
 
   /**
@@ -164,10 +168,7 @@ public class NodePlan {
    * @throws IOException
    */
   public String toJson() throws IOException {
-    ObjectMapper mapper = new ObjectMapper();
-    JavaType planType = mapper.constructType(NodePlan.class);
-    return mapper.writerFor(planType)
-        .writeValueAsString(this);
+    return WRITER.writeValueAsString(this);
   }
 
   /**

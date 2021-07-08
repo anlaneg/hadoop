@@ -33,12 +33,15 @@ module.exports = function(environment) {
       }
     },
 
+    moment: {
+      includeTimezone: 'all'
+    },
+
     APP: DEFAULT_CONFIG,
     contentSecurityPolicy: {
       'connect-src': "* 'self'",
       'child-src': "'self' 'unsafe-inline'",
       'style-src': "'self' 'unsafe-inline'",
-      'script-src': "'self' 'unsafe-inline'"
     }
   };
 

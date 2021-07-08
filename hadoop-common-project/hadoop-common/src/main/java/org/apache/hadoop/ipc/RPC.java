@@ -35,11 +35,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.net.SocketFactory;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.HadoopIllegalArgumentException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeys;
@@ -51,6 +51,7 @@ import org.apache.hadoop.ipc.protobuf.RpcHeaderProtos.RpcResponseHeaderProto.Rpc
 import org.apache.hadoop.ipc.protobuf.RpcHeaderProtos.RpcResponseHeaderProto.RpcStatusProto;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.SaslRpcServer;
+import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.SecretManager;
 import org.apache.hadoop.security.token.TokenIdentifier;
@@ -59,7 +60,9 @@ import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Time;
 
-import com.google.protobuf.BlockingService;
+import org.apache.hadoop.thirdparty.protobuf.BlockingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** A simple RPC mechanism.
  *
@@ -110,7 +113,7 @@ public class RPC {
         Writable rpcRequest, long receiveTime) throws Exception ;
   }
   
-  static final Log LOG = LogFactory.getLog(RPC.class);
+  static final Logger LOG = LoggerFactory.getLogger(RPC.class);
   
   /**
    * Get all superInterfaces that extend VersionedProtocol
@@ -193,14 +196,18 @@ public class RPC {
   private static final String ENGINE_PROP = "rpc.engine";
 
   /**
-   * Set a protocol to use a non-default RpcEngine.
+   * Set a protocol to use a non-default RpcEngine if one
+   * is not specified in the configuration.
    * @param conf configuration to use
    * @param protocol the protocol interface
    * @param engine the RpcEngine impl
    */
   public static void setProtocolEngine(Configuration conf,
                                 Class<?> protocol, Class<?> engine) {
-    conf.setClass(ENGINE_PROP+"."+protocol.getName(), engine, RpcEngine.class);
+    if (conf.get(ENGINE_PROP+"."+protocol.getName()) == null) {
+      conf.setClass(ENGINE_PROP+"."+protocol.getName(), engine,
+                    RpcEngine.class);
+    }
   }
 
   // return the RpcEngine configured to handle a protocol
@@ -584,7 +591,44 @@ public class RPC {
     }
     return getProtocolEngine(protocol, conf).getProxy(protocol, clientVersion,
         addr, ticket, conf, factory, rpcTimeout, connectionRetryPolicy,
-        fallbackToSimpleAuth);
+        fallbackToSimpleAuth, null);
+  }
+
+  /**
+   * Get a protocol proxy that contains a proxy connection to a remote server
+   * and a set of methods that are supported by the server.
+   *
+   * @param protocol protocol
+   * @param clientVersion client's version
+   * @param addr server address
+   * @param ticket security ticket
+   * @param conf configuration
+   * @param factory socket factory
+   * @param rpcTimeout max time for each rpc; 0 means no timeout
+   * @param connectionRetryPolicy retry policy
+   * @param fallbackToSimpleAuth set to true or false during calls to indicate
+   *   if a secure client falls back to simple auth
+   * @param alignmentContext state alignment context
+   * @return the proxy
+   * @throws IOException if any error occurs
+   */
+  public static <T> ProtocolProxy<T> getProtocolProxy(Class<T> protocol,
+                                long clientVersion,
+                                InetSocketAddress addr,
+                                UserGroupInformation ticket,
+                                Configuration conf,
+                                SocketFactory factory,
+                                int rpcTimeout,
+                                RetryPolicy connectionRetryPolicy,
+                                AtomicBoolean fallbackToSimpleAuth,
+                                AlignmentContext alignmentContext)
+       throws IOException {
+    if (UserGroupInformation.isSecurityEnabled()) {
+      SaslRpcServer.init(conf);
+    }
+    return getProtocolEngine(protocol, conf).getProxy(protocol, clientVersion,
+        addr, ticket, conf, factory, rpcTimeout, connectionRetryPolicy,
+        fallbackToSimpleAuth, alignmentContext);
   }
 
    /**
@@ -717,6 +761,7 @@ public class RPC {
     private final Configuration conf;    
     private SecretManager<? extends TokenIdentifier> secretManager = null;
     private String portRangeConfig = null;
+    private AlignmentContext alignmentContext = null;
     
     public Builder(Configuration conf) {
       this.conf = conf;
@@ -783,6 +828,12 @@ public class RPC {
       return this;
     }
     
+    /** Default: null */
+    public Builder setAlignmentContext(AlignmentContext alignmentContext) {
+      this.alignmentContext = alignmentContext;
+      return this;
+    }
+
     /**
      * Build the RPC Server. 
      * @throws IOException on error
@@ -802,19 +853,52 @@ public class RPC {
       return getProtocolEngine(this.protocol, this.conf).getServer(
           this.protocol, this.instance, this.bindAddress, this.port,
           this.numHandlers, this.numReaders, this.queueSizePerHandler,
-          this.verbose, this.conf, this.secretManager, this.portRangeConfig);
+          this.verbose, this.conf, this.secretManager, this.portRangeConfig,
+          this.alignmentContext);
     }
   }
   
   /** An RPC Server. */
   public abstract static class Server extends org.apache.hadoop.ipc.Server {
-   boolean verbose;
-   static String classNameBase(String className) {
-      String[] names = className.split("\\.", -1);
-      if (names == null || names.length == 0) {
-        return className;
+
+    boolean verbose;
+
+    private static final Pattern COMPLEX_SERVER_NAME_PATTERN =
+        Pattern.compile("(?:[^\\$]*\\$)*([A-Za-z][^\\$]+)(?:\\$\\d+)?");
+
+    /**
+     * Get a meaningful and short name for a server based on a java class.
+     *
+     * The rules are defined to support the current naming schema of the
+     * generated protobuf classes where the final class usually an anonymous
+     * inner class of an inner class.
+     *
+     * 1. For simple classes it returns with the simple name of the classes
+     *     (with the name without package name)
+     *
+     * 2. For inner classes, this is the simple name of the inner class.
+     *
+     * 3.  If it is an Object created from a class factory
+     *   E.g., org.apache.hadoop.ipc.TestRPC$TestClass$2
+     * this method returns parent class TestClass.
+     *
+     * 4. If it is an anonymous class E.g., 'org.apache.hadoop.ipc.TestRPC$10'
+     * serverNameFromClass returns parent class TestRPC.
+     *
+     *
+     */
+    static String serverNameFromClass(Class<?> clazz) {
+      String name = clazz.getName();
+      String[] names = clazz.getName().split("\\.", -1);
+      if (names != null && names.length > 0) {
+        name = names[names.length - 1];
       }
-      return names[names.length-1];
+      Matcher matcher = COMPLEX_SERVER_NAME_PATTERN.matcher(name);
+      if (matcher.find()) {
+        return matcher.group(1);
+      } else {
+        return name;
+      }
     }
    
    /**
@@ -853,11 +937,18 @@ public class RPC {
     */
    static class ProtoClassProtoImpl {
      final Class<?> protocolClass;
-     final Object protocolImpl; 
+      final Object protocolImpl;
+      private final boolean shadedPBImpl;
+
      ProtoClassProtoImpl(Class<?> protocolClass, Object protocolImpl) {
        this.protocolClass = protocolClass;
        this.protocolImpl = protocolImpl;
+       this.shadedPBImpl = protocolImpl instanceof BlockingService;
      }
+
+      public boolean isShadedPBImpl() {
+        return shadedPBImpl;
+      }
    }
 
    ArrayList<Map<ProtoNameVer, ProtoClassProtoImpl>> protocolImplMapArray = 
@@ -897,7 +988,18 @@ public class RPC {
            " ProtocolImpl=" + protocolImpl.getClass().getName() +
            " protocolClass=" + protocolClass.getName());
      }
-   }
+      String client = SecurityUtil.getClientPrincipal(protocolClass, getConf());
+      if (client != null) {
+        // notify the server's rpc scheduler that the protocol user has
+        // highest priority.  the scheduler should exempt the user from
+        // priority calculations.
+        try {
+          setPriorityLevel(UserGroupInformation.createRemoteUser(client), -1);
+        } catch (Exception ex) {
+          LOG.warn("Failed to set scheduling priority for " + client, ex);
+        }
+      }
+    }
    
    static class VerProtocolImpl {
      final long version;
@@ -964,7 +1066,7 @@ public class RPC {
     
     private void initProtocolMetaInfo(Configuration conf) {
       RPC.setProtocolEngine(conf, ProtocolMetaInfoPB.class,
-          ProtobufRpcEngine.class);
+          ProtobufRpcEngine2.class);
       ProtocolMetaInfoServerSideTranslatorPB xlator = 
           new ProtocolMetaInfoServerSideTranslatorPB(this);
       BlockingService protocolInfoBlockingService = ProtocolInfoService
@@ -988,7 +1090,7 @@ public class RPC {
     @Override
     public Writable call(RPC.RpcKind rpcKind, String protocol,
         Writable rpcRequest, long receiveTime) throws Exception {
-      return getRpcInvoker(rpcKind).call(this, protocol, rpcRequest,
+      return getServerRpcInvoker(rpcKind).call(this, protocol, rpcRequest,
           receiveTime);
     }
   }

@@ -516,6 +516,10 @@ public class AuthenticationFilter implements Filter {
       AuthenticationToken token;
       try {
         token = getToken(httpRequest);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Got token {} from httpRequest {}", token,
+              getRequestURL(httpRequest));
+        }
       }
       catch (AuthenticationException ex) {
         LOG.warn("AuthenticationToken ignored: " + ex.getMessage());
@@ -526,8 +530,8 @@ public class AuthenticationFilter implements Filter {
       if (authHandler.managementOperation(token, httpRequest, httpResponse)) {
         if (token == null) {
           if (LOG.isDebugEnabled()) {
-            LOG.debug("Request [{}] triggering authentication",
-                getRequestURL(httpRequest));
+            LOG.debug("Request [{}] triggering authentication. handler: {}",
+                getRequestURL(httpRequest), authHandler.getClass());
           }
           token = authHandler.authenticate(httpRequest, httpResponse);
           if (token != null && token != AuthenticationToken.ANONYMOUS) {
@@ -588,6 +592,10 @@ public class AuthenticationFilter implements Filter {
           doFilter(filterChain, httpRequest, httpResponse);
         }
       } else {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("managementOperation returned false for request {}."
+                  + " token: {}", getRequestURL(httpRequest), token);
+        }
         unauthorizedResponse = false;
       }
     } catch (AuthenticationException ex) {
@@ -611,11 +619,17 @@ public class AuthenticationFilter implements Filter {
                 KerberosAuthenticator.WWW_AUTHENTICATE))) {
           errCode = HttpServletResponse.SC_FORBIDDEN;
         }
+        // After Jetty 9.4.21, sendError() no longer allows a custom message.
+        // use setStatus() to set a custom message.
+        String reason;
         if (authenticationEx == null) {
-          httpResponse.sendError(errCode, "Authentication required");
+          reason = "Authentication required";
         } else {
-          httpResponse.sendError(errCode, authenticationEx.getMessage());
+          reason = authenticationEx.getMessage();
         }
+
+        httpResponse.setStatus(errCode, reason);
+        httpResponse.sendError(errCode, reason);
       }
     }
   }
@@ -673,7 +687,7 @@ public class AuthenticationFilter implements Filter {
     if (expires >= 0 && isCookiePersistent) {
       Date date = new Date(expires);
       SimpleDateFormat df = new SimpleDateFormat("EEE, " +
-              "dd-MMM-yyyy HH:mm:ss zzz");
+              "dd-MMM-yyyy HH:mm:ss zzz", Locale.US);
       df.setTimeZone(TimeZone.getTimeZone("GMT"));
       sb.append("; Expires=").append(df.format(date));
     }

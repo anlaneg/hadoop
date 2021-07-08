@@ -21,11 +21,12 @@ import java.io.IOException;
 import java.util.Set;
 
 import org.apache.hadoop.HadoopIllegalArgumentException;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.UnresolvedLinkException;
 import org.apache.hadoop.fs.permission.FsAction;
+import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.BlockStoragePolicy;
-import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
 import org.apache.hadoop.hdfs.protocol.QuotaExceededException;
 import org.apache.hadoop.hdfs.protocol.SnapshotAccessControlException;
 import org.apache.hadoop.hdfs.server.blockmanagement.BlockInfo;
@@ -38,7 +39,7 @@ import org.apache.hadoop.hdfs.server.namenode.FSDirectory.DirOp;
 import org.apache.hadoop.hdfs.server.namenode.FSNamesystem.RecoverLeaseOp;
 import org.apache.hadoop.hdfs.server.namenode.INode.BlocksMapUpdateInfo;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Helper class to perform truncate operation.
@@ -104,13 +105,17 @@ final class FSDirTruncateOp {
       final BlockInfo last = file.getLastBlock();
       if (last != null && last.getBlockUCState()
           == BlockUCState.UNDER_RECOVERY) {
-        final Block truncatedBlock = last.getUnderConstructionFeature()
+        final BlockInfo truncatedBlock = last.getUnderConstructionFeature()
             .getTruncateBlock();
         if (truncatedBlock != null) {
           final long truncateLength = file.computeFileSize(false, false)
               + truncatedBlock.getNumBytes();
           if (newLength == truncateLength) {
             return new TruncateResult(false, fsd.getAuditFileInfo(iip));
+          } else {
+            throw new AlreadyBeingCreatedException(
+                RecoverLeaseOp.TRUNCATE_FILE.getExceptionMessage(src,
+                    clientName, clientMachine, src + " is being truncated."));
           }
         }
       }
@@ -259,9 +264,14 @@ final class FSDirTruncateOp {
       oldBlock = file.getLastBlock();
       assert !oldBlock.isComplete() : "oldBlock should be under construction";
       BlockUnderConstructionFeature uc = oldBlock.getUnderConstructionFeature();
-      uc.setTruncateBlock(new Block(oldBlock));
+      uc.setTruncateBlock(new BlockInfoContiguous(oldBlock,
+          oldBlock.getReplication()));
       uc.getTruncateBlock().setNumBytes(oldBlock.getNumBytes() - lastBlockDelta);
-      uc.getTruncateBlock().setGenerationStamp(newBlock.getGenerationStamp());
+      final long newGenerationStamp = newBlock.getGenerationStamp();
+      uc.getTruncateBlock().setGenerationStamp(newGenerationStamp);
+      // Update global generation stamp in Standby NameNode
+      blockManager.getBlockIdManager().setGenerationStampIfGreater(
+          newGenerationStamp);
       truncatedBlockUC = oldBlock;
 
       NameNode.stateChangeLog.debug("BLOCK* prepareFileForTruncate: " +
@@ -270,7 +280,7 @@ final class FSDirTruncateOp {
     }
     if (shouldRecoverNow) {
       truncatedBlockUC.getUnderConstructionFeature().initializeBlockRecovery(
-          truncatedBlockUC, newBlock.getGenerationStamp());
+          truncatedBlockUC, newBlock.getGenerationStamp(), true);
     }
 
     return newBlock;
@@ -348,9 +358,9 @@ final class FSDirTruncateOp {
    */
   static class TruncateResult {
     private final boolean result;
-    private final HdfsFileStatus stat;
+    private final FileStatus stat;
 
-    public TruncateResult(boolean result, HdfsFileStatus stat) {
+    public TruncateResult(boolean result, FileStatus stat) {
       this.result = result;
       this.stat = stat;
     }
@@ -366,7 +376,7 @@ final class FSDirTruncateOp {
     /**
      * @return file information.
      */
-    HdfsFileStatus getFileStatus() {
+    FileStatus getFileStatus() {
       return stat;
     }
   }

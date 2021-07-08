@@ -18,14 +18,17 @@
 
 package org.apache.hadoop.mapreduce.v2.app;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
+
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -36,15 +39,17 @@ import java.util.List;
 import java.util.Map;
 
 import java.util.concurrent.TimeoutException;
+
+import org.apache.hadoop.mapreduce.util.MRJobConfUtil;
+import org.apache.hadoop.mapreduce.v2.app.job.event.TaskAttemptFailEvent;
 import org.junit.Assert;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.JobContext;
 import org.apache.hadoop.mapreduce.Counters;
 import org.apache.hadoop.mapreduce.JobCounter;
 import org.apache.hadoop.mapreduce.JobID;
@@ -101,21 +106,34 @@ import org.apache.hadoop.yarn.event.EventHandler;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.yarn.util.Clock;
 import org.apache.hadoop.yarn.util.SystemClock;
+
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
 public class TestRecovery {
 
-  private static final Log LOG = LogFactory.getLog(TestRecovery.class);
-  private static Path outputDir = new Path(new File("target", 
-      TestRecovery.class.getName()).getAbsolutePath() + 
-      Path.SEPARATOR + "out");
+  private static final Logger LOG = LoggerFactory.getLogger(TestRecovery.class);
+
+  private static File testRootDir;
+  private static Path outputDir;
   private static String partFile = "part-r-00000";
   private Text key1 = new Text("key1");
   private Text key2 = new Text("key2");
   private Text val1 = new Text("val1");
   private Text val2 = new Text("val2");
+
+  @BeforeClass
+  public static void setupClass() throws Exception {
+    // setup the test root directory
+    testRootDir =
+        GenericTestUtils.setupTestRootDir(
+            TestRecovery.class);
+    outputDir = new Path(testRootDir.getAbsolutePath(), "out");
+  }
 
   /**
    * AM with 2 maps and 1 reduce. For 1st map, one attempt fails, one attempt
@@ -159,16 +177,13 @@ public class TestRecovery {
     app.waitForState(task1Attempt1, TaskAttemptState.RUNNING);
     app.waitForState(task2Attempt, TaskAttemptState.RUNNING);
     
-    // reduces must be in NEW state
-    Assert.assertEquals("Reduce Task state not correct",
-        TaskState.RUNNING, reduceTask.getReport().getTaskState());
+    app.waitForState(reduceTask, TaskState.RUNNING);
 
     /////////// Play some games with the TaskAttempts of the first task //////
     //send the fail signal to the 1st map task attempt
     app.getContext().getEventHandler().handle(
-        new TaskAttemptEvent(
-            task1Attempt1.getID(),
-            TaskAttemptEventType.TA_FAILMSG));
+        new TaskAttemptFailEvent(
+            task1Attempt1.getID()));
     
     app.waitForState(task1Attempt1, TaskAttemptState.FAILED);
 
@@ -454,6 +469,8 @@ public class TestRecovery {
   public static class TestFileOutputCommitter extends
       org.apache.hadoop.mapred.FileOutputCommitter {
 
+    private boolean abortJobCalled;
+
     @Override
     public boolean isRecoverySupported(
         org.apache.hadoop.mapred.JobContext jobContext) {
@@ -463,6 +480,16 @@ public class TestRecovery {
             "want.am.recovery", false);
       }
       return isRecoverySupported;
+    }
+
+    @Override
+    public void abortJob(JobContext context, int runState) throws IOException {
+      super.abortJob(context, runState);
+      this.abortJobCalled = true;
+    }
+
+    private boolean isAbortJobCalled() {
+      return this.abortJobCalled;
     }
   }
 
@@ -585,14 +612,13 @@ public class TestRecovery {
     MRApp app = new MRAppWithHistory(1, 1, false, this.getClass().getName(),
         true, ++runCount) {
     };
-    Configuration conf = new Configuration();
+    Configuration conf =
+        MRJobConfUtil.initEncryptedIntermediateConfigsForTesting(null);
     conf.setBoolean(MRJobConfig.MR_AM_JOB_RECOVERY_ENABLE, true);
     conf.setBoolean("mapred.mapper.new-api", true);
     conf.setBoolean("mapred.reducer.new-api", true);
     conf.setBoolean(MRJobConfig.JOB_UBERTASK_ENABLE, false);
     conf.set(FileOutputFormat.OUTDIR, outputDir.toString());
-    conf.setBoolean(MRJobConfig.MR_ENCRYPTED_INTERMEDIATE_DATA, true);
-
     // run the MR job at the first attempt
     Job jobAttempt1 = app.submit(conf);
     app.waitForState(jobAttempt1, JobState.RUNNING);
@@ -1012,6 +1038,73 @@ public class TestRecovery {
   }
 
   @Test
+  public void testPreviousJobOutputCleanedWhenNoRecovery() throws Exception {
+    int runCount = 0;
+    MRApp app = new MRAppWithHistory(1, 2, false, this.getClass().getName(),
+        true, ++runCount);
+    Configuration conf = new Configuration();
+    conf.setBoolean(MRJobConfig.MR_AM_JOB_RECOVERY_ENABLE, false);
+    conf.setClass("mapred.output.committer.class",
+        TestFileOutputCommitter.class,
+        org.apache.hadoop.mapred.OutputCommitter.class);
+    conf.setBoolean(MRJobConfig.JOB_UBERTASK_ENABLE, false);
+    conf.set(FileOutputFormat.OUTDIR, outputDir.toString());
+    Job job = app.submit(conf);
+    app.waitForState(job, JobState.RUNNING);
+    Assert.assertEquals("No of tasks not correct", 3, job.getTasks().size());
+    //stop the app before the job completes.
+    app.stop();
+    app.close();
+
+    //rerun
+    app = new MRAppWithHistory(1, 2, false, this.getClass().getName(), false,
+        ++runCount);
+    job = app.submit(conf);
+    app.waitForState(job, JobState.RUNNING);
+    Assert.assertEquals("No of tasks not correct", 3, job.getTasks().size());
+    TestFileOutputCommitter committer = (
+        TestFileOutputCommitter) app.getCommitter();
+    assertTrue("commiter.abortJob() has not been called",
+        committer.isAbortJobCalled());
+    app.close();
+  }
+
+  @Test
+  public void testPreviousJobIsNotCleanedWhenRecovery()
+      throws Exception {
+    int runCount = 0;
+    MRApp app = new MRAppWithHistory(1, 2, false, this.getClass().getName(),
+        true, ++runCount);
+    Configuration conf = new Configuration();
+    conf.setBoolean(MRJobConfig.MR_AM_JOB_RECOVERY_ENABLE, true);
+    conf.setClass("mapred.output.committer.class",
+        TestFileOutputCommitter.class,
+        org.apache.hadoop.mapred.OutputCommitter.class);
+    conf.setBoolean(MRJobConfig.JOB_UBERTASK_ENABLE, false);
+    // TestFileOutputCommitter supports recovery if want.am.recovery=true
+    conf.setBoolean("want.am.recovery", true);
+    conf.set(FileOutputFormat.OUTDIR, outputDir.toString());
+    Job job = app.submit(conf);
+    app.waitForState(job, JobState.RUNNING);
+    Assert.assertEquals("No of tasks not correct", 3, job.getTasks().size());
+    //stop the app before the job completes.
+    app.stop();
+    app.close();
+
+    //rerun
+    app = new MRAppWithHistory(1, 2, false, this.getClass().getName(), false,
+        ++runCount);
+    job = app.submit(conf);
+    app.waitForState(job, JobState.RUNNING);
+    Assert.assertEquals("No of tasks not correct", 3, job.getTasks().size());
+    TestFileOutputCommitter committer = (
+        TestFileOutputCommitter) app.getCommitter();
+    assertFalse("commiter.abortJob() has been called",
+        committer.isAbortJobCalled());
+    app.close();
+  }
+
+  @Test
   public void testOutputRecoveryMapsOnly() throws Exception {
     int runCount = 0;
     MRApp app = new MRAppWithHistory(2, 1, false, this.getClass().getName(),
@@ -1301,9 +1394,7 @@ public class TestRecovery {
     app.waitForState(task1Attempt2, TaskAttemptState.RUNNING);
     app.waitForState(task2Attempt, TaskAttemptState.RUNNING);
 
-    // reduces must be in NEW state
-    Assert.assertEquals("Reduce Task state not correct",
-        TaskState.RUNNING, reduceTask.getReport().getTaskState());
+    app.waitForState(reduceTask, TaskState.RUNNING);
 
     //send the done signal to the map 1 attempt 1
     app.getContext().getEventHandler().handle(
@@ -1431,9 +1522,7 @@ public class TestRecovery {
     app.waitForState(task1Attempt, TaskAttemptState.RUNNING);
     app.waitForState(task2Attempt, TaskAttemptState.RUNNING);
 
-    // reduces must be in NEW state
-    Assert.assertEquals("Reduce Task state not correct",
-        TaskState.RUNNING, reduceTask.getReport().getTaskState());
+    app.waitForState(reduceTask, TaskState.RUNNING);
 
     //send the done signal to the 1st map attempt
     app.getContext().getEventHandler().handle(
@@ -1998,7 +2087,7 @@ public class TestRecovery {
     expectedOutput.append(key1).append("\n");
     expectedOutput.append(key2).append('\t').append(val2).append("\n");
     String output = slurp(expectedFile);
-    Assert.assertEquals(output, expectedOutput.toString());
+    assertThat(output).isEqualTo(expectedOutput.toString());
   }
 
   public static String slurp(File f) throws IOException {

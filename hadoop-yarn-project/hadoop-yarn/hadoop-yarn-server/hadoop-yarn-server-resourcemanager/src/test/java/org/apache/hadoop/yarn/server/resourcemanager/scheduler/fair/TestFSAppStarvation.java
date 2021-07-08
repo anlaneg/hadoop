@@ -23,6 +23,12 @@ import org.apache.hadoop.yarn.server.resourcemanager.MockRM;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.NodeUpdateSchedulerEvent;
 
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair
+    .allocationfile.AllocationFileQueue;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair
+    .allocationfile.AllocationFileWriter;
+import org.apache.hadoop.yarn.util.ControlledClock;
+
 import org.junit.After;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -32,16 +38,16 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
 
 /**
- * Test class to verify identification of app starvation
+ * Test class to verify identification of app starvation.
  */
 public class TestFSAppStarvation extends FairSchedulerTestBase {
 
   private static final File ALLOC_FILE = new File(TEST_DIR, "test-QUEUES");
+
+  private final ControlledClock clock = new ControlledClock();
 
   // Node Capacity = NODE_CAPACITY_MULTIPLE * (1 GB or 1 vcore)
   private static final int NODE_CAPACITY_MULTIPLE = 4;
@@ -59,6 +65,9 @@ public class TestFSAppStarvation extends FairSchedulerTestBase {
         ALLOC_FILE.getAbsolutePath());
     conf.setBoolean(FairSchedulerConfiguration.PREEMPTION, true);
     conf.setFloat(FairSchedulerConfiguration.PREEMPTION_THRESHOLD, 0f);
+    // This effectively disables the update thread since we call update
+    // explicitly on the main thread
+    conf.setLong(FairSchedulerConfiguration.UPDATE_INTERVAL_MS, Long.MAX_VALUE);
   }
 
   @After
@@ -93,19 +102,45 @@ public class TestFSAppStarvation extends FairSchedulerTestBase {
   public void testPreemptionEnabled() throws Exception {
     setupClusterAndSubmitJobs();
 
+    // Wait for apps to be processed by MockPreemptionThread
+    for (int i = 0; i < 6000; ++i) {
+      if (preemptionThread.uniqueAppsAdded() >= 3) {
+        break;
+      }
+      Thread.sleep(10);
+    }
+
     assertNotNull("FSContext does not have an FSStarvedApps instance",
         scheduler.getContext().getStarvedApps());
     assertEquals("Expecting 3 starved applications, one each for the "
             + "minshare and fairshare queues",
         3, preemptionThread.uniqueAppsAdded());
 
-    // Verify the apps get added again on a subsequent update
+    // Verify apps are added again only after the set delay for starvation has
+    // passed.
+    clock.tickSec(1);
     scheduler.update();
-    Thread.yield();
-
+    assertEquals("Apps re-added even before starvation delay passed",
+        preemptionThread.totalAppsAdded(), preemptionThread.uniqueAppsAdded());
     verifyLeafQueueStarvation();
-    assertTrue("Each app is marked as starved exactly once",
-        preemptionThread.totalAppsAdded() > preemptionThread.uniqueAppsAdded());
+
+    clock.tickMsec(
+        FairSchedulerWithMockPreemption.DELAY_FOR_NEXT_STARVATION_CHECK_MS);
+    scheduler.update();
+
+    // Wait for apps to be processed by MockPreemptionThread
+    for (int i = 0; i < 6000; ++i) {
+      if(preemptionThread.totalAppsAdded() >=
+          preemptionThread.uniqueAppsAdded() * 2) {
+        break;
+      }
+      Thread.sleep(10);
+    }
+
+    assertEquals("Each app should be marked as starved once" +
+            " at each scheduler update above",
+        preemptionThread.totalAppsAdded(),
+        preemptionThread.uniqueAppsAdded() * 2);
   }
 
   /*
@@ -141,13 +176,10 @@ public class TestFSAppStarvation extends FairSchedulerTestBase {
     sendEnoughNodeUpdatesToAssignFully();
 
     // Sleep to hit the preemption timeouts
-    Thread.sleep(10);
+    clock.tickMsec(10);
 
     // Scheduler update to populate starved apps
     scheduler.update();
-
-    // Wait for apps to be processed by MockPreemptionThread
-    Thread.yield();
   }
 
   /**
@@ -157,59 +189,49 @@ public class TestFSAppStarvation extends FairSchedulerTestBase {
    * 3. Add two nodes to the cluster
    * 4. Submit an app that uses up all resources on the cluster
    */
-  private void setupStarvedCluster() throws IOException {
-    PrintWriter out = new PrintWriter(new FileWriter(ALLOC_FILE));
-    out.println("<?xml version=\"1.0\"?>");
-    out.println("<allocations>");
-
-    // Default queue
-    out.println("<queue name=\"default\">");
-    out.println("</queue>");
-
-    // Queue with preemption disabled
-    out.println("<queue name=\"no-preemption\">");
-    out.println("<fairSharePreemptionThreshold>0" +
-        "</fairSharePreemptionThreshold>");
-    out.println("</queue>");
-
-    // Queue with minshare preemption enabled
-    out.println("<queue name=\"minshare\">");
-    out.println("<fairSharePreemptionThreshold>0" +
-        "</fairSharePreemptionThreshold>");
-    out.println("<minSharePreemptionTimeout>0" +
-        "</minSharePreemptionTimeout>");
-    out.println("<minResources>2048mb,2vcores</minResources>");
-    out.println("</queue>");
-
-    // FAIR queue with fairshare preemption enabled
-    out.println("<queue name=\"fairshare\">");
-    out.println("<fairSharePreemptionThreshold>1" +
-        "</fairSharePreemptionThreshold>");
-    out.println("<fairSharePreemptionTimeout>0" +
-        "</fairSharePreemptionTimeout>");
-    out.println("<schedulingPolicy>fair</schedulingPolicy>");
-    addChildQueue(out);
-    out.println("</queue>");
-
-    // DRF queue with fairshare preemption enabled
-    out.println("<queue name=\"drf\">");
-    out.println("<fairSharePreemptionThreshold>1" +
-        "</fairSharePreemptionThreshold>");
-    out.println("<fairSharePreemptionTimeout>0" +
-        "</fairSharePreemptionTimeout>");
-    out.println("<schedulingPolicy>drf</schedulingPolicy>");
-    addChildQueue(out);
-    out.println("</queue>");
-
-    out.println("</allocations>");
-    out.close();
+  private void setupStarvedCluster() {
+    AllocationFileWriter.create()
+        .drfDefaultQueueSchedulingPolicy()
+        // Default queue
+        .addQueue(new AllocationFileQueue.Builder("default").build())
+        // Queue with preemption disabled
+        .addQueue(new AllocationFileQueue.Builder("no-preemption")
+            .fairSharePreemptionThreshold(0).build())
+        // Queue with minshare preemption enabled
+        .addQueue(new AllocationFileQueue.Builder("minshare")
+            .fairSharePreemptionThreshold(0)
+            .minSharePreemptionTimeout(0)
+            .minResources("2048mb,2vcores")
+            .build())
+        // FAIR queue with fairshare preemption enabled
+        .addQueue(new AllocationFileQueue.Builder("fairshare")
+            .fairSharePreemptionThreshold(1)
+            .fairSharePreemptionTimeout(0)
+            .schedulingPolicy("fair")
+            .subQueue(new AllocationFileQueue.Builder("child")
+                .fairSharePreemptionThreshold(1)
+                .fairSharePreemptionTimeout(0)
+                .schedulingPolicy("fair").build())
+            .build())
+        // DRF queue with fairshare preemption enabled
+        .addQueue(new AllocationFileQueue.Builder("drf")
+            .fairSharePreemptionThreshold(1)
+            .fairSharePreemptionTimeout(0)
+            .schedulingPolicy("drf")
+            .subQueue(new AllocationFileQueue.Builder("child")
+                .fairSharePreemptionThreshold(1)
+                .fairSharePreemptionTimeout(0)
+                .schedulingPolicy("drf").build())
+            .build())
+        .writeToFile(ALLOC_FILE.getAbsolutePath());
 
     assertTrue("Allocation file does not exist, not running the test",
         ALLOC_FILE.exists());
 
     resourceManager = new MockRM(conf);
-    resourceManager.start();
     scheduler = (FairScheduler) resourceManager.getResourceScheduler();
+    scheduler.setClock(clock);
+    resourceManager.start();
     preemptionThread = (FairSchedulerWithMockPreemption.MockPreemptionThread)
         scheduler.preemptionThread;
 
@@ -225,16 +247,6 @@ public class TestFSAppStarvation extends FairSchedulerTestBase {
     sendEnoughNodeUpdatesToAssignFully();
 
     assertEquals(8, scheduler.getSchedulerApp(app).getLiveContainers().size());
-  }
-
-  private void addChildQueue(PrintWriter out) {
-    // Child queue under fairshare with same settings
-    out.println("<queue name=\"child\">");
-    out.println("<fairSharePreemptionThreshold>1" +
-        "</fairSharePreemptionThreshold>");
-    out.println("<fairSharePreemptionTimeout>0" +
-        "</fairSharePreemptionTimeout>");
-    out.println("</queue>");
   }
 
   private void submitAppsToEachLeafQueue() {

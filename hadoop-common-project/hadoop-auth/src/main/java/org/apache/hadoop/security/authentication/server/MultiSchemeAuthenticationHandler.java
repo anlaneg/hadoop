@@ -30,8 +30,8 @@ import org.apache.hadoop.security.authentication.client.AuthenticationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Splitter;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Splitter;
 
 /**
  * The {@link MultiSchemeAuthenticationHandler} supports configuring multiple
@@ -186,11 +186,12 @@ public class MultiSchemeAuthenticationHandler implements
     String authorization =
         request.getHeader(HttpConstants.AUTHORIZATION_HEADER);
     if (authorization != null) {
-      for (String scheme : schemeToAuthHandlerMapping.keySet()) {
-        if (AuthenticationHandlerUtil.matchAuthScheme(scheme, authorization)) {
-          AuthenticationHandler handler =
-              schemeToAuthHandlerMapping.get(scheme);
-          AuthenticationToken token = handler.authenticate(request, response);
+      for (Map.Entry<String, AuthenticationHandler> entry :
+          schemeToAuthHandlerMapping.entrySet()) {
+        if (AuthenticationHandlerUtil.matchAuthScheme(
+            entry.getKey(), authorization)) {
+          AuthenticationToken token =
+              entry.getValue().authenticate(request, response);
           logger.trace("Token generated with type {}", token.getType());
           return token;
         }

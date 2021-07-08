@@ -24,10 +24,10 @@ import java.util.*;
 import java.rmi.server.UID;
 import java.security.MessageDigest;
 
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.commons.logging.*;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.util.Options;
 import org.apache.hadoop.fs.*;
+import org.apache.hadoop.fs.StreamCapabilities;
 import org.apache.hadoop.fs.Options.CreateOpts;
 import org.apache.hadoop.io.compress.CodecPool;
 import org.apache.hadoop.io.compress.CompressionCodec;
@@ -51,6 +51,8 @@ import org.apache.hadoop.util.NativeCodeLoader;
 import org.apache.hadoop.util.MergeSort;
 import org.apache.hadoop.util.PriorityQueue;
 import org.apache.hadoop.util.Time;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_FILE_BUFFER_SIZE_DEFAULT;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_FILE_BUFFER_SIZE_KEY;
@@ -78,7 +80,7 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
  *                                       values.
  *   </li>
  *   <li>
- *   <code>BlockCompressWriter</code> : Block-compressed files, both keys & 
+ *   <code>BlockCompressWriter</code> : Block-compressed files, both keys &amp;
  *                                      values are collected in 'blocks' 
  *                                      separately and compressed. The size of 
  *                                      the 'block' is configurable.
@@ -93,13 +95,13 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
  * <p>The {@link SequenceFile.Reader} acts as the bridge and can read any of the
  * above <code>SequenceFile</code> formats.</p>
  *
- * <h4 id="Formats">SequenceFile Formats</h4>
+ * <h3 id="Formats">SequenceFile Formats</h3>
  * 
  * <p>Essentially there are 3 different formats for <code>SequenceFile</code>s
  * depending on the <code>CompressionType</code> specified. All of them share a
  * <a href="#Header">common header</a> described below.
  * 
- * <h5 id="Header">SequenceFile Header</h5>
+ * <h4 id="Header">SequenceFile Header</h4>
  * <ul>
  *   <li>
  *   version - 3 bytes of magic header <b>SEQ</b>, followed by 1 byte of actual 
@@ -132,7 +134,7 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
  *   </li>
  * </ul>
  * 
- * <h5 id="#UncompressedFormat">Uncompressed SequenceFile Format</h5>
+ * <h5>Uncompressed SequenceFile Format</h5>
  * <ul>
  * <li>
  * <a href="#Header">Header</a>
@@ -151,7 +153,7 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
  * </li>
  * </ul>
  *
- * <h5 id="#RecordCompressedFormat">Record-Compressed SequenceFile Format</h5>
+ * <h5>Record-Compressed SequenceFile Format</h5>
  * <ul>
  * <li>
  * <a href="#Header">Header</a>
@@ -170,7 +172,7 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
  * </li>
  * </ul>
  * 
- * <h5 id="#BlockCompressedFormat">Block-Compressed SequenceFile Format</h5>
+ * <h5>Block-Compressed SequenceFile Format</h5>
  * <ul>
  * <li>
  * <a href="#Header">Header</a>
@@ -203,7 +205,7 @@ import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.IO_SKIP_CHECKSU
 @InterfaceAudience.Public
 @InterfaceStability.Stable
 public class SequenceFile {
-  private static final Log LOG = LogFactory.getLog(SequenceFile.class);
+  private static final Logger LOG = LoggerFactory.getLogger(SequenceFile.class);
 
   private SequenceFile() {}                         // no public ctor
 
@@ -230,7 +232,7 @@ public class SequenceFile {
    * 
    * @see SequenceFile.Writer
    */
-  public static enum CompressionType {
+  public enum CompressionType {
     /** Do not compress records. */
     NONE, 
     /** Compress values only, each separately. */
@@ -825,15 +827,16 @@ public class SequenceFile {
         this.theMetadata.entrySet().iterator();
       while (iter.hasNext()) {
         Map.Entry<Text, Text> en = iter.next();
-        sb.append("\t").append(en.getKey().toString()).append("\t").append(en.getValue().toString());
-        sb.append("\n");
+        sb.append("\t").append(en.getKey().toString()).append("\t")
+            .append(en.getValue().toString()).append("\n");
       }
       return sb.toString();
     }
   }
   
   /** Write key/value pairs to a sequence-format file. */
-  public static class Writer implements java.io.Closeable, Syncable {
+  public static class Writer implements java.io.Closeable, Syncable,
+                  Flushable, StreamCapabilities {
     private Configuration conf;
     FSDataOutputStream out;
     boolean ownOutputStream = true;
@@ -1366,6 +1369,21 @@ public class SequenceFile {
         out.hflush();
       }
     }
+
+    @Override
+    public void flush() throws IOException {
+      if (out != null) {
+        out.flush();
+      }
+    }
+
+    @Override
+    public boolean hasCapability(String capability) {
+      if (out !=null && capability != null) {
+        return out.hasCapability(capability);
+      }
+      return false;
+    }
     
     /** Returns the configuration of this file. */
     Configuration getConf() { return conf; }
@@ -1882,7 +1900,7 @@ public class SequenceFile {
     @Deprecated
     public Reader(FileSystem fs, Path file, 
                   Configuration conf) throws IOException {
-      this(conf, file(file.makeQualified(fs)));
+      this(conf, file(fs.makeQualified(file)));
     }
 
     /**
@@ -1923,7 +1941,7 @@ public class SequenceFile {
         succeeded = true;
       } finally {
         if (!succeeded) {
-          IOUtils.cleanup(LOG, this.in);
+          IOUtils.cleanupWithLogger(LOG, this.in);
         }
       }
     }
@@ -1934,8 +1952,8 @@ public class SequenceFile {
      * @param fs The file system used to open the file.
      * @param file The file being read.
      * @param bufferSize The buffer size used to read the file.
-     * @param length The length being read if it is >= 0.  Otherwise,
-     *               the length is not available.
+     * @param length The length being read if it is {@literal >=} 0.
+     *               Otherwise, the length is not available.
      * @return The opened stream.
      * @throws IOException
      */
@@ -2816,14 +2834,30 @@ public class SequenceFile {
     }
 
     /** Sort and merge using an arbitrary {@link RawComparator}. */
+    @SuppressWarnings("deprecation")
     public Sorter(FileSystem fs, RawComparator comparator, Class keyClass,
                   Class valClass, Configuration conf, Metadata metadata) {
       this.fs = fs;
       this.comparator = comparator;
       this.keyClass = keyClass;
       this.valClass = valClass;
-      this.memory = conf.getInt("io.sort.mb", 100) * 1024 * 1024;
-      this.factor = conf.getInt("io.sort.factor", 100);
+      // Remember to fall-back on the deprecated MB and Factor keys
+      // until they are removed away permanently.
+      if (conf.get(CommonConfigurationKeys.IO_SORT_MB_KEY) != null) {
+        this.memory = conf.getInt(CommonConfigurationKeys.IO_SORT_MB_KEY,
+          CommonConfigurationKeys.SEQ_IO_SORT_MB_DEFAULT) * 1024 * 1024;
+      } else {
+        this.memory = conf.getInt(CommonConfigurationKeys.SEQ_IO_SORT_MB_KEY,
+          CommonConfigurationKeys.SEQ_IO_SORT_MB_DEFAULT) * 1024 * 1024;
+      }
+      if (conf.get(CommonConfigurationKeys.IO_SORT_FACTOR_KEY) != null) {
+        this.factor = conf.getInt(CommonConfigurationKeys.IO_SORT_FACTOR_KEY,
+            CommonConfigurationKeys.SEQ_IO_SORT_FACTOR_DEFAULT);
+      } else {
+        this.factor = conf.getInt(
+            CommonConfigurationKeys.SEQ_IO_SORT_FACTOR_KEY,
+            CommonConfigurationKeys.SEQ_IO_SORT_FACTOR_DEFAULT);
+      }
       this.conf = conf;
       this.metadata = metadata;
     }

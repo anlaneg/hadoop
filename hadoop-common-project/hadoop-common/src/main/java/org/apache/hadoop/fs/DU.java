@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.fs;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
@@ -52,7 +52,8 @@ public class DU extends CachingGetSpaceUsed {
     try {
       duShell.startRefresh();
     } catch (IOException ioe) {
-      LOG.warn("Could not get disk usage information", ioe);
+      LOG.warn("Could not get disk usage information for path {}",
+          getDirPath(), ioe);
     }
   }
 

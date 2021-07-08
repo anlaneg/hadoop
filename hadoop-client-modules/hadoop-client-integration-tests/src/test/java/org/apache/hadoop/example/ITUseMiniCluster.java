@@ -35,6 +35,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
 
 import org.apache.hadoop.conf.Configuration;
 
@@ -43,6 +44,7 @@ import org.apache.hadoop.hdfs.MiniDFSCluster;
 
 import org.apache.hadoop.hdfs.web.WebHdfsTestUtil;
 import org.apache.hadoop.hdfs.web.WebHdfsConstants;
+import org.apache.hadoop.yarn.server.MiniYARNCluster;
 
 /**
  * Ensure that we can perform operations against the shaded minicluster
@@ -54,6 +56,7 @@ public class ITUseMiniCluster {
       LoggerFactory.getLogger(ITUseMiniCluster.class);
 
   private MiniDFSCluster cluster;
+  private MiniYARNCluster yarnCluster;
 
   private static final String TEST_PATH = "/foo/bar/cats/dee";
   private static final String FILENAME = "test.file";
@@ -73,16 +76,25 @@ public class ITUseMiniCluster {
         .numDataNodes(3)
         .build();
     cluster.waitActive();
+
+    conf.set("yarn.scheduler.capacity.root.queues", "default");
+    conf.setInt("yarn.scheduler.capacity.root.default.capacity", 100);
+    yarnCluster = new MiniYARNCluster(getClass().getName(), 1, 1, 1, 1);
+    yarnCluster.init(conf);
+    yarnCluster.start();
   }
 
   @After
   public void clusterDown() {
-    cluster.close();
+    if (cluster != null) {
+      cluster.close();
+    }
+    IOUtils.cleanupWithLogger(LOG, yarnCluster);
   }
 
   @Test
   public void useHdfsFileSystem() throws IOException {
-    try (final FileSystem fs = cluster.getFileSystem()) {
+    try (FileSystem fs = cluster.getFileSystem()) {
       simpleReadAfterWrite(fs);
     }
   }
@@ -94,10 +106,10 @@ public class ITUseMiniCluster {
       throw new IOException("Mkdirs failed to create " +
           TEST_PATH);
     }
-    try (final FSDataOutputStream out = fs.create(path)) {
+    try (FSDataOutputStream out = fs.create(path)) {
       out.writeUTF(TEXT);
     }
-    try (final FSDataInputStream in = fs.open(path)) {
+    try (FSDataInputStream in = fs.open(path)) {
       final String result = in.readUTF();
       Assert.assertEquals("Didn't read back text we wrote.", TEXT, result);
     }
@@ -105,7 +117,7 @@ public class ITUseMiniCluster {
 
   @Test
   public void useWebHDFS() throws IOException, URISyntaxException {
-    try (final FileSystem fs = WebHdfsTestUtil.getWebHdfsFileSystem(
+    try (FileSystem fs = WebHdfsTestUtil.getWebHdfsFileSystem(
         cluster.getConfiguration(0), WebHdfsConstants.WEBHDFS_SCHEME)) {
       simpleReadAfterWrite(fs);
     }
