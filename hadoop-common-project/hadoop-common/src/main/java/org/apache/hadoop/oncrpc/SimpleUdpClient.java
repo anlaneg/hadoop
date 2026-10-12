@@ -48,35 +48,40 @@ public class SimpleUdpClient {
   public SimpleUdpClient(String host, int port, XDR request, Boolean oneShot,
                          DatagramSocket clientSocket, int udpTimeoutMillis) {
     this.host = host;
-    this.port = port;
-    this.request = request;
+    this.port = port;/*目的端地址*/
+    this.request = request;/*请求*/
     this.oneShot = oneShot;
     this.clientSocket = clientSocket;
     this.udpTimeoutMillis = udpTimeoutMillis;
   }
 
+  /*SimpleUdpClient运行，如果无异常，则请求成功，无响应*/
   public void run() throws IOException {
     InetAddress IPAddress = InetAddress.getByName(host);
-    byte[] sendData = request.getBytes();
+    byte[] sendData = request.getBytes();/*请求rcp对应的byte流*/
     byte[] receiveData = new byte[65535];
     // Use the provided socket if there is one, else just make a new one.
     DatagramSocket socket = this.clientSocket == null ?
         new DatagramSocket() : this.clientSocket;
 
     try {
+    	/*构造要发送的报文，指定ip地址及端口*/
       DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length,
           IPAddress, port);
+      /*发送此报文*/
       socket.send(sendPacket);
       socket.setSoTimeout(udpTimeoutMillis);
       DatagramPacket receivePacket = new DatagramPacket(receiveData,
           receiveData.length);
+      /*接收响应*/
       socket.receive(receivePacket);
 
       // Check reply status
       XDR xdr = new XDR(Arrays.copyOfRange(receiveData, 0,
           receivePacket.getLength()));
-      RpcReply reply = RpcReply.read(xdr);
+      RpcReply reply = RpcReply.read(xdr);/*解出响应*/
       if (reply.getState() != RpcReply.ReplyState.MSG_ACCEPTED) {
+    	  /*响应有误*/
         throw new IOException("Request failed: " + reply.getState());
       }
     } finally {

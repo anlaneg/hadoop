@@ -143,12 +143,16 @@ public abstract class RpcProgram extends ChannelInboundHandlerAdapter {
    * @param set specifies registration or not
    */
   protected void register(PortmapMapping mapEntry, boolean set) {
+	/*创建mapping request*/
     XDR mappingRequest = PortmapRequest.create(mapEntry, set);
+    /*创建client，指定目的主机，目的端口及请求内容*/
     SimpleUdpClient registrationClient = new SimpleUdpClient(host, RPCB_PORT,
         mappingRequest, true, registrationSocket, portmapUdpTimeoutMillis);
     try {
+    	/*执行注册请求*/
       registrationClient.run();
     } catch (IOException e) {
+    	/*请求注册时失败*/
       String request = set ? "Registration" : "Unregistration";
       LOG.error(request + " failure with " + host + ":" + port
           + ", portmap entry: " + mapEntry);

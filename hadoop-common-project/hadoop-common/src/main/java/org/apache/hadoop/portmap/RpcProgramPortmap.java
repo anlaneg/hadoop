@@ -64,6 +64,7 @@ final class RpcProgramPortmap extends IdleStateHandler {
     super(1, 1, 1);
     // FIXME: set default idle timeout 1 second.
     this.allChannels = allChannels;
+    /*创建tcp,udp两个mapping,并加入到map table*/
     PortmapMapping m = new PortmapMapping(PROGRAM, VERSION,
         PortmapMapping.TRANSPORT_TCP, RpcProgram.RPCB_PORT);
     PortmapMapping m1 = new PortmapMapping(PROGRAM, VERSION,
@@ -91,12 +92,15 @@ final class RpcProgramPortmap extends IdleStateHandler {
    * "(prog, vers, prot)".
    */
   private XDR set(int xid, XDR in, XDR out) {
+	  /*生成mapping*/
     PortmapMapping mapping = PortmapRequest.mapping(in);
+    /*得到key*/
     String key = PortmapMapping.key(mapping);
     if (LOG.isDebugEnabled()) {
       LOG.debug("Portmap set key=" + key);
     }
 
+    /*添加到mapping*/
     map.put(key, mapping);
     return PortmapResponse.intReply(out, xid, mapping.getPort());
   }
@@ -114,7 +118,7 @@ final class RpcProgramPortmap extends IdleStateHandler {
     if (LOG.isDebugEnabled())
       LOG.debug("Portmap remove key=" + key);
 
-    map.remove(key);
+    map.remove(key);/*自map中移除某个port map*/
     return PortmapResponse.booleanReply(out, xid, true);
   }
 

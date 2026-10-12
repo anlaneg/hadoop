@@ -34,7 +34,7 @@ public class Mountd extends MountdBase {
 
   public Mountd(NfsConfiguration config, DatagramSocket registrationSocket,
       boolean allowInsecurePorts) throws IOException {
-    super(new RpcProgramMountd(config, registrationSocket, allowInsecurePorts));
+    super(new RpcProgramMountd(config, registrationSocket, allowInsecurePorts)/*创建rpc progame并初始化*/);
   }
   
   public static void main(String[] args) throws IOException {

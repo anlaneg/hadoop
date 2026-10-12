@@ -43,6 +43,7 @@ public abstract class RpcReply extends RpcMessage {
   protected final ReplyState replyState;
   protected final Verifier verifier;
 
+  /*构造reply类型的rpc消息*/
   RpcReply(int xid, ReplyState state, Verifier verifier) {
     super(xid, RpcMessage.Type.RPC_REPLY);
     this.replyState = state;

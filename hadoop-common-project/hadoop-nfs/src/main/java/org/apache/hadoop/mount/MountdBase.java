@@ -54,11 +54,13 @@ abstract public class MountdBase {
    * @throws IOException fail to construct MountdBase
    */
   public MountdBase(RpcProgram program) throws IOException {
+	  /*构造rpc program*/
     rpcProgram = program;
   }
 
   /* Start UDP server */
   private void startUDPServer() {
+	  /*启动udp server*/
     udpServer = new SimpleUdpServer(rpcProgram.getPort(),
         rpcProgram, 1);
     rpcProgram.startDaemons();
@@ -78,6 +80,7 @@ abstract public class MountdBase {
 
   /* Start TCP server */
   private void startTCPServer() {
+	  /*启动tcp server*/
     tcpServer = new SimpleTcpServer(rpcProgram.getPort(),
         rpcProgram, 1);
     rpcProgram.startDaemons();

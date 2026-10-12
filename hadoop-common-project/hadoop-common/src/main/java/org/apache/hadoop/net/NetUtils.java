@@ -756,6 +756,7 @@ public class NetUtils {
    * @return hostname
    */
   public static String getHostname() {
+	  /*取本机地址*/
     try {return "" + InetAddress.getLocalHost();}
     catch(UnknownHostException uhe) {return "" + uhe;}
   }

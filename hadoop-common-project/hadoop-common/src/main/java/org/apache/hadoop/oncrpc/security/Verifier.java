@@ -63,6 +63,7 @@ public abstract class Verifier extends RpcAuthInfo {
    * @param xdr XDR message
    */
   public static void writeFlavorAndVerifier(Verifier verifier, XDR xdr) {
+	  /*依据verifier类型，输出verifier类型值*/
     if (verifier instanceof VerifierNone) {
       xdr.writeInt(AuthFlavor.AUTH_NONE.getValue());
     } else if (verifier instanceof VerifierGSS) {
@@ -70,6 +71,7 @@ public abstract class Verifier extends RpcAuthInfo {
     } else {
       throw new UnsupportedOperationException("Cannot recognize the verifier");
     }
+    /*各verifier类型自主写XDR*/
     verifier.write(xdr);
   }
 }

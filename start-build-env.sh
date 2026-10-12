@@ -19,14 +19,18 @@ set -e               # exit on error
 
 cd "$(dirname "$0")" # connect to root
 
+#指定docker目录及dockerfile
 DOCKER_DIR=dev-support/docker
 DOCKER_FILE="${DOCKER_DIR}/Dockerfile"
 
+#取体系结构
 CPU_ARCH=$(echo "$MACHTYPE" | cut -d- -f1)
 if [[ "$CPU_ARCH" == "aarch64" || "$CPU_ARCH" == "arm64" ]]; then
+  #指明采用arm版本
   DOCKER_FILE="${DOCKER_DIR}/Dockerfile_aarch64"
 fi
 
+#docker开始构造镜像hadoop-build
 docker build -t hadoop-build -f $DOCKER_FILE $DOCKER_DIR
 
 USER_NAME=${SUDO_USER:=$USER}
@@ -36,6 +40,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   GROUP_ID=100
 fi
 
+#遇到操作系统
 if [ "$(uname -s)" = "Linux" ]; then
   GROUP_ID=$(id -g "${USER_NAME}")
   # man docker-run
@@ -69,6 +74,7 @@ fi
 # Set the home directory in the Docker container.
 DOCKER_HOME_DIR=${DOCKER_HOME_DIR:-/home/${USER_NAME}}
 
+#生成hadoop-build-${USER_ID}
 docker build -t "hadoop-build-${USER_ID}" - <<UserSpecificDocker
 FROM hadoop-build
 RUN rm -f /var/log/faillog /var/log/lastlog
@@ -87,6 +93,7 @@ DOCKER_INTERACTIVE_RUN=${DOCKER_INTERACTIVE_RUN-"-i -t"}
 # within the container and use the result on your normal
 # system.  And this also is a significant speedup in subsequent
 # builds because the dependencies are downloaded only once.
+# 启动此镜像
 docker run --rm=true $DOCKER_INTERACTIVE_RUN \
   -v "${PWD}:${DOCKER_HOME_DIR}/hadoop${V_OPTS:-}" \
   -w "${DOCKER_HOME_DIR}/hadoop" \

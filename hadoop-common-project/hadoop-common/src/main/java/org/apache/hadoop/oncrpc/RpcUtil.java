@@ -42,6 +42,7 @@ public final class RpcUtil {
   private static int xid = (int) (System.currentTimeMillis() / 1000) << 12;
 
   public static int getNewXid(String caller) {
+	  /*更新并返回xid,采用此方式，xid会跳着更新*/
     return xid = ++xid + caller.hashCode();
   }
 

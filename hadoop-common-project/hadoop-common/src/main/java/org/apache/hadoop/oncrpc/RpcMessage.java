@@ -22,19 +22,23 @@ package org.apache.hadoop.oncrpc;
  */
 public abstract class RpcMessage {
   /** Message type */
+	/*定义sunrpc消息类型*/
   public enum Type {
     // the order of the values below are significant.
     RPC_CALL,
     RPC_REPLY;
 
     public int getValue() {
+    	/*返回当前type的源始值*/
       return ordinal();
     }
 
     public static Type fromValue(int value) {
+    	/*由value转为type*/
       if (value < 0 || value >= values().length) {
         return null;
       }
+      /*返回此枚举对应的type*/
       return values()[value];
     }
   }
@@ -44,8 +48,11 @@ public abstract class RpcMessage {
 
   RpcMessage(int xid, Type messageType) {
     if (messageType != Type.RPC_CALL && messageType != Type.RPC_REPLY) {
+    	/*无效的rpc 消息类型*/
       throw new IllegalArgumentException("Invalid message type " + messageType);
     }
+    
+    /*设置xid,message type*/
     this.xid = xid;
     this.messageType = messageType;
   }
@@ -57,11 +64,13 @@ public abstract class RpcMessage {
   }
 
   public Type getMessageType() {
+	  /*取消息类型*/
     return messageType;
   }
 
   protected void validateMessageType(Type expected) {
     if (expected != messageType) {
+    	/*检查expected对应的type是否与此message类型一致，如不一致扔异常*/
       throw new IllegalArgumentException("Message type is expected to be "
           + expected + " but got " + messageType);
     }

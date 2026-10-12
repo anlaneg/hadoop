@@ -112,7 +112,7 @@ public final class XDR {
 
   public void writeInt(int v) {
     ensureFreeSpace(SIZEOF_INT);
-    buf.putInt(v);
+    buf.putInt(v);/*写int类型的v*/
   }
 
   public boolean readBoolean() {
@@ -204,6 +204,7 @@ public final class XDR {
   private void ensureFreeSpace(int size) {
     Preconditions.checkState(state == State.WRITING);
     if (buf.remaining() < size) {
+    	/*容量不足，扩充*/
       int newCapacity = buf.capacity() * 2;
       int newRemaining = buf.capacity() + buf.remaining();
 

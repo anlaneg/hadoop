@@ -44,6 +44,7 @@ public class Nfs3 extends Nfs3Base {
       boolean allowInsecurePorts) throws IOException {
     super(RpcProgramNfs3.createRpcProgramNfs3(conf, registrationSocket,
         allowInsecurePorts), conf);
+    /*创建mountd对象*/
     mountd = new Mountd(conf, registrationSocket, allowInsecurePorts);
   }
 
@@ -64,8 +65,10 @@ public class Nfs3 extends Nfs3Base {
     boolean allowInsecurePorts = conf.getBoolean(
         NfsConfigKeys.DFS_NFS_PORT_MONITORING_DISABLED_KEY,
         NfsConfigKeys.DFS_NFS_PORT_MONITORING_DISABLED_DEFAULT);
+    /*创建nfs server*/
     final Nfs3 nfsServer = new Nfs3(conf, registrationSocket,
         allowInsecurePorts);
+    /*启动service*/
     nfsServer.startServiceInternal(true);
     return nfsServer;
   }
@@ -76,6 +79,7 @@ public class Nfs3 extends Nfs3Base {
   }
 
   public static void main(String[] args) throws IOException {
+	  /*启动service*/
     startService(args, null);
   }
 }

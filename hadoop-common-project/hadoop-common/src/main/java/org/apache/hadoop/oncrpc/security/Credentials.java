@@ -42,6 +42,8 @@ public abstract class Credentials extends RpcAuthInfo {
       throw new UnsupportedOperationException("Unsupported Credentials Flavor "
           + flavor);
     }
+    
+    /*凭证类型自已读取XDR*/
     credentials.read(xdr);
     return credentials;
   }
@@ -52,6 +54,7 @@ public abstract class Credentials extends RpcAuthInfo {
    * @param xdr XDR message
    */
   public static void writeFlavorAndCredentials(Credentials cred, XDR xdr) {
+	  /*按照凭证类型，写不同的凭证值*/
     if (cred instanceof CredentialsNone) {
       xdr.writeInt(AuthFlavor.AUTH_NONE.getValue());
     } else if (cred instanceof CredentialsSys) {
@@ -61,6 +64,7 @@ public abstract class Credentials extends RpcAuthInfo {
     } else {
       throw new UnsupportedOperationException("Cannot recognize the verifier");
     }
+    /*凭证类型自已写值到XDR*/
     cred.write(xdr);
   }
 

@@ -804,7 +804,9 @@ public class StringUtils {
    */
   public static void startupShutdownMessage(Class<?> clazz, String[] args,
                                      final org.slf4j.Logger log) {
+	  /*主机名称*/
     final String hostname = NetUtils.getHostname();
+    /*类名称*/
     final String classname = clazz.getSimpleName();
     log.info(createStartupShutdownMessage(classname, hostname, args));
 

@@ -37,6 +37,6 @@ public class CredentialsNone extends Credentials {
   @Override
   public void write(XDR xdr) {
     Preconditions.checkState(mCredentialsLength == 0);
-    xdr.writeInt(mCredentialsLength);
+    xdr.writeInt(mCredentialsLength);/*写凭证长度零*/
   }
 }

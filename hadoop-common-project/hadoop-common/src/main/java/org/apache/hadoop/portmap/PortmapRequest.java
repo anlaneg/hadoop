@@ -31,15 +31,23 @@ public class PortmapRequest {
     return PortmapMapping.deserialize(xdr);
   }
 
-  public static XDR create(PortmapMapping mapping, boolean set) {
+  public static XDR create(PortmapMapping mapping, boolean set/*是否调用set 或者unset rpc过程*/) {
     XDR request = new XDR();
+    /*rpc过程号*/
     int procedure = set ? RpcProgramPortmap.PMAPPROC_SET
         : RpcProgramPortmap.PMAPPROC_UNSET;
+    
+    /*构造rpc call*/
     RpcCall call = RpcCall.getInstance(
-        RpcUtil.getNewXid(String.valueOf(RpcProgramPortmap.PROGRAM)),
+    		/*生成xid*/
+        RpcUtil.getNewXid(String.valueOf(RpcProgramPortmap.PROGRAM)/*转为字符串*/),
         RpcProgramPortmap.PROGRAM, RpcProgramPortmap.VERSION, procedure,
         new CredentialsNone(), new VerifierNone());
+    
+    /*将rpc call写入到request buffer中*/
     call.write(request);
+    
+    /*mapping序列化此request*/
     return mapping.serialize(request);
   }
 }

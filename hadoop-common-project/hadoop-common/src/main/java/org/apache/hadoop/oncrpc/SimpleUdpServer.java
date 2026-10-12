@@ -51,7 +51,7 @@ public class SimpleUdpServer {
   private EventLoopGroup workerGroup;
 
   public SimpleUdpServer(int port, ChannelInboundHandlerAdapter program,
-      int workerCount) {
+      int workerCount/*worker数量*/) {
     this.port = port;
     this.rpcProgram = program;
     this.workerCount = workerCount;
